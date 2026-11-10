@@ -19,3 +19,5 @@ dist/
 /target/
 .DS_Store
 
+# Local verification screenshots and reports
+/.artifacts/
