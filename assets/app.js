@@ -7,6 +7,7 @@ const requests = new Map();
 const replies = new Map();
 let composerMode='request',replySaving=false;
 let replyEdit=null,replyEditSaving=false,renameContact=null,renameSaving=false;
+let settingsData=null,settingsSaving=false,settingsController;
 let conversationMenu=null,chatToDelete=null,chatDeleting=false;
 let listController, chatController, editorController;
 const icon = name => { const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); const use=document.createElementNS(svg.namespaceURI,'use'); use.setAttribute('href',`#${name}-icon`);svg.append(use);svg.setAttribute('aria-hidden','true');return svg; };
@@ -102,7 +103,7 @@ async function loadConversations({refreshChat=false,reveal=null}={}){
   try{
     const data=await api(`/api/conversations?${new URLSearchParams({q:state.query,label:state.label,unlabeled:state.unlabeled?'1':'0'})}`,{signal:listController.signal});
     if(request!==state.listRequest)return;
-    state.data=data;$('new-chat').disabled=false;
+    state.data=data;$('new-chat').disabled=$('settings').disabled=false;
     const selected=data.items.find(item=>sameContact(item,state.current));
     if(!selected&&state.query&&sameContact(reveal?.contact,state.current)){
       clearTimeout(searchTimer);state.query='';$('search').value='';
@@ -347,6 +348,52 @@ function syncLabelChoice(id){
   $(id).closest('.field').hidden=existing;$(id).disabled=existing;
 }
 function labelChoiceValue(id){return ($(id+'-existing').checked?$(id+'-select'):$(id)).value.trim();}
+function contextEntries(){
+  return [...$('context-entries').children].map(row=>({key:row.querySelector('input').value.trim(),value:row.querySelector('textarea').value.trim()})).filter(entry=>entry.key||entry.value);
+}
+function settingsDirty(){return settingsData!==null&&JSON.stringify(contextEntries())!==JSON.stringify(settingsData.entries);}
+function syncSettings(){
+  $('save-settings').disabled=settingsSaving||!settingsDirty();
+  for(const row of $('context-entries').children){const key=row.querySelector('input'),value=row.querySelector('textarea');key.required=value.required=Boolean(key.value.trim()||value.value.trim());value.style.height='40px';value.style.height=`${Math.min(value.scrollHeight+2,160)}px`;}
+}
+function addContext(entry={key:'',value:''}){
+  const row=el('div','context-row'),key=el('input'),value=el('textarea');
+  key.type='text';key.maxLength=100;key.autocomplete='off';key.setAttribute('aria-label','키');key.value=entry.key;
+  value.rows=1;value.maxLength=10000;value.setAttribute('aria-label','값');value.value=entry.value;
+  const remove=button('','icon-button',()=>{const next=row.nextElementSibling||row.previousElementSibling;row.remove();syncSettings();(next?.querySelector('input')||$('add-context')).focus();});
+  remove.setAttribute('aria-label','항목 삭제');remove.append(icon('delete'));
+  row.append(key,value,remove);$('context-entries').append(row);return key;
+}
+async function openSettings(){
+  settingsData=null;settingsController=new AbortController();
+  $('context-entries').replaceChildren();$('settings-error').hidden=true;$('settings-status').hidden=false;
+  $('add-context').disabled=$('save-settings').disabled=true;$('settings-dialog').showModal();
+  const controller=settingsController;
+  try{
+    const data=await api('/api/general-context',{signal:controller.signal});
+    if(controller.signal.aborted)return;
+    settingsData=data;
+    for(const entry of data.entries.length?data.entries:[{key:'',value:''}])addContext(entry);
+    $('add-context').disabled=false;syncSettings();$('context-entries').querySelector('input').focus();
+  }catch(e){if(e.name!=='AbortError'){$('settings-error').textContent=e.message;$('settings-error').hidden=false;}}
+  finally{if(settingsController===controller)$('settings-status').hidden=true;}
+}
+function closeSettings(){
+  if(settingsSaving||settingsDirty()&&!confirm('변경 사항을 버리시겠습니까?'))return;
+  settingsController?.abort();settingsData=null;$('settings-dialog').close();
+}
+async function saveSettings(){
+  if(settingsSaving||!settingsDirty()||!$('settings-form').reportValidity())return;
+  const entries=contextEntries();
+  if(new Set(entries.map(entry=>entry.key)).size!==entries.length){$('settings-error').textContent='중복된 키를 수정하거나 삭제하세요.';$('settings-error').hidden=false;return;}
+  settingsSaving=true;$('settings-error').hidden=true;
+  for(const control of $('settings-form').querySelectorAll('input,textarea,button'))control.disabled=true;
+  try{
+    await api('/api/general-context',{method:'PUT',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({entries,revision:settingsData.revision})});
+    settingsData=null;$('settings-dialog').close();toast('저장됨');
+  }catch(e){$('settings-error').textContent=e.message;$('settings-error').hidden=false;}
+  finally{settingsSaving=false;for(const control of $('settings-form').querySelectorAll('input,textarea,button'))control.disabled=false;syncSettings();}
+}
 function openNewChat(){
   $('new-chat-form').reset();$('new-chat-error').hidden=true;
   setupLabelChoice('new-role');
@@ -480,6 +527,12 @@ $('rename-dialog').addEventListener('cancel',event=>{event.preventDefault();clos
 $('back').addEventListener('click',()=>{document.querySelector('.app').classList.remove('show-chat');document.querySelector('.conversation-row.selected')?.focus({preventScroll:true});});
 $('filter-label').addEventListener('change',()=>{const value=$('filter-label').value;state.unlabeled=value==='unlabeled';state.label=value.startsWith('label:')?value.slice(6):'';loadConversations();});
 $('role-tag').addEventListener('click',openLabel);
+$('settings').addEventListener('click',openSettings);
+$('add-context').addEventListener('click',()=>{addContext().focus();syncSettings();});
+$('context-entries').addEventListener('input',()=>{$('settings-error').hidden=true;syncSettings();});
+$('settings-form').addEventListener('submit',event=>{event.preventDefault();saveSettings();});
+$('cancel-settings').addEventListener('click',closeSettings);
+$('settings-dialog').addEventListener('cancel',event=>{event.preventDefault();closeSettings();});
 $('new-chat').addEventListener('click',openNewChat);
 $('new-chat-form').addEventListener('submit',event=>{event.preventDefault();createChat();});
 $('cancel-new-chat').addEventListener('click',()=>{if(!state.creating)$('new-chat-dialog').close();});
@@ -516,7 +569,7 @@ $('restore-body').addEventListener('click',()=>{if(!state.editing)return;$('edit
 $('copy-body').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('panel-original').hidden?$('edit-body').value:state.editing.display_original);toast('본문 복사됨');}catch{showEditorError('복사 실패 · 본문을 선택해 직접 복사하세요.');}});
 for(const tab of ['edit','original']){$(`tab-${tab}`).addEventListener('click',()=>setTab(tab));$(`tab-${tab}`).addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?'edit':event.key==='End'?'original':tab==='edit'?'original':'edit';setTab(next);$(`tab-${next}`).focus();}});}
 document.addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'&&!document.querySelector('dialog[open]')){event.preventDefault();if(window.matchMedia('(max-width:700px)').matches)document.querySelector('.app').classList.remove('show-chat');$('search').focus();}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='s'){if($('editor').open){event.preventDefault();save();}else if($('reply-editor').open){event.preventDefault();$('reply-edit-form').requestSubmit();}else if($('rename-dialog').open){event.preventDefault();$('rename-form').requestSubmit();}}});
-window.addEventListener('beforeunload',event=>{if(state.dirty||replyEditDirty()||renameDirty()||[...requests.values(),...replies.values()].some(value=>value.trim())){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{if(state.dirty||replyEditDirty()||renameDirty()||settingsDirty()||[...requests.values(),...replies.values()].some(value=>value.trim())){event.preventDefault();event.returnValue='';}});
 $('conversations').replaceChildren(...Array.from({length:5},()=>el('div','loading-line')));
 const messageResizeObserver=new ResizeObserver(updateMessageToggles);
 messageResizeObserver.observe($('timeline'));

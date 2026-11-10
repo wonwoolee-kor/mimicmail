@@ -21,9 +21,10 @@
   </svg>
   <main class="app">
     <aside class="sidebar" aria-label="대화 목록">
-      <header class="brand-row"><span class="brand-mark">m</span><h1 class="brand">메일함</h1><button id="new-chat" class="new-chat-button" disabled>+ 새 대화</button></header>
+      <header class="brand-row"><span class="brand-mark">m</span><h1 class="brand">메일함</h1><button id="settings" class="new-chat-button" disabled>설정</button></header>
       <div class="search-wrap"><svg aria-hidden="true"><use href="#search-icon"/></svg><label for="search" class="sr-only">이름, 직급, 내용 검색</label><input id="search" type="search" placeholder="이름, 직급, 내용 검색" autocomplete="off"><kbd>⌘ K</kbd></div>
       <label class="sr-only" for="filter-label">직급 필터</label><select id="filter-label" class="label-filter"><option value="">모든 직급</option></select>
+      <div class="conversation-actions"><button id="new-chat" class="new-chat-button" disabled>+ 새 대화</button></div>
       <div id="list-status" class="list-status" role="status" aria-live="polite"></div>
       <div id="conversations" class="conversation-list" aria-label="수신자별 대화"></div>
     </aside>
@@ -44,6 +45,21 @@
       </div></footer>
     </section>
   </main>
+  <dialog id="settings-dialog" class="label-dialog settings-dialog" aria-labelledby="settings-heading">
+    <div class="editor-heading"><h2 id="settings-heading">설정</h2><button id="cancel-settings" type="button" class="icon-button" aria-label="설정 닫기"><svg><use href="#close-icon"/></svg></button></div>
+    <form id="settings-form">
+      <div class="settings-section-heading"><h3 id="context-heading">General context</h3><button id="add-context" type="button" class="text-button" disabled>+ 추가</button></div>
+      <div class="settings-scroll">
+        <div class="context-table" role="group" aria-labelledby="context-heading">
+          <div class="context-columns" aria-hidden="true"><span>키</span><span>값</span></div>
+          <div id="context-entries"></div>
+        </div>
+        <p id="settings-status" role="status" hidden>불러오는 중…</p>
+      </div>
+      <p id="settings-error" class="editor-error" role="alert" hidden></p>
+      <footer class="settings-footer"><button id="save-settings" type="submit" class="primary-button" disabled>저장</button></footer>
+    </form>
+  </dialog>
   <dialog id="new-chat-dialog" class="label-dialog" aria-labelledby="new-chat-heading">
     <div class="editor-heading"><h2 id="new-chat-heading">새 대화</h2></div>
     <form id="new-chat-form" class="new-chat-form">

@@ -108,6 +108,11 @@ fn existing_database_search_edit_labels_and_deletion_match_python() {
                     .as_object_mut()
                     .unwrap()
                     .remove("recipient_name");
+                assert_eq!(selected["current_facts"]["general_context"], json!({}));
+                selected["current_facts"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("general_context");
                 assert_eq!(
                     selected["current_facts"],
                     anonymized(&expected["current_facts"], "")

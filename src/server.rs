@@ -169,6 +169,8 @@ async fn handle(
             .strip_prefix("/api/mail/")
             .and_then(|s| s.parse::<i64>().ok());
         let result = match (method.as_str(), path.as_str(), id) {
+            ("GET", "/api/general-context", _) => gui::general_context(&db)?,
+            ("PUT", "/api/general-context", _) => gui::update_general_context(&db, &payload)?,
             ("GET", "/api/conversations", _) => {
                 let mut result = mailbox::read(&db, &work, |db| {
                     mailbox::conversations(

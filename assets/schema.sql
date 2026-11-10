@@ -38,3 +38,7 @@ CREATE TABLE IF NOT EXISTS sent_mail (
             body TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS received_conversation ON received_replies(owner, recipient);
+        CREATE TABLE IF NOT EXISTS general_context (
+            id INTEGER PRIMARY KEY CHECK(id=1), entries_json TEXT NOT NULL,
+            revision INTEGER NOT NULL
+        );
