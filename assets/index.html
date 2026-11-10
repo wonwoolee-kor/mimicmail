@@ -44,8 +44,12 @@
     <div class="editor-heading"><h2 id="new-chat-heading">새 대화</h2></div>
     <form id="new-chat-form" class="new-chat-form">
       <label class="field">이름<input id="new-name" maxlength="100" required autocomplete="off"></label>
-      <label class="field">직급 (선택)<input id="new-role" list="new-known-labels" maxlength="100" placeholder="예: 교수, 팀장" autocomplete="off"></label>
-      <datalist id="new-known-labels"></datalist>
+      <fieldset class="label-choice">
+        <legend>직급 (선택)</legend>
+        <div class="label-modes"><label><input id="new-role-existing" type="radio" name="new-role-mode" value="existing" checked>기존 라벨 선택</label><label><input id="new-role-new" type="radio" name="new-role-mode" value="new">새 라벨 추가</label></div>
+        <label class="field">기존 라벨<select id="new-role-select"></select></label>
+        <label class="field" hidden>새 라벨 이름<input id="new-role" maxlength="100" placeholder="예: 교수, 팀장" autocomplete="off" disabled></label>
+      </fieldset>
       <p id="new-chat-error" class="editor-error" role="alert" hidden></p>
       <footer class="label-footer"><button id="cancel-new-chat" type="button" class="text-button">취소</button><button id="create-chat" type="submit" class="primary-button">대화 시작</button></footer>
     </form>
@@ -68,8 +72,12 @@
   <dialog id="label-editor" class="label-dialog" aria-labelledby="label-heading">
     <div class="editor-heading"><h2 id="label-heading">직급 라벨</h2><button id="close-label" class="icon-button" aria-label="직급 편집 닫기"><svg><use href="#close-icon"/></svg></button></div>
     <form id="label-form">
-      <label class="field" for="role-label">상대방의 직급<input id="role-label" list="known-labels" maxlength="100" placeholder="예: 교수, 팀장, 연구원" autocomplete="off"></label>
-      <datalist id="known-labels"></datalist>
+      <fieldset class="label-choice">
+        <legend>상대방의 직급</legend>
+        <div class="label-modes"><label><input id="role-label-existing" type="radio" name="role-label-mode" value="existing" checked>기존 라벨 선택</label><label><input id="role-label-new" type="radio" name="role-label-mode" value="new">새 라벨 추가</label></div>
+        <label class="field">기존 라벨<select id="role-label-select" required></select></label>
+        <label class="field" hidden>새 라벨 이름<input id="role-label" maxlength="100" placeholder="예: 교수, 팀장, 연구원" autocomplete="off" required disabled></label>
+      </fieldset>
       <div class="hue-field">
         <div class="field-heading"><label for="label-hue">색상</label><output id="label-hue-name" for="label-hue">색상 없음</output></div>
         <input id="label-hue" type="range" min="25" max="305" step="5" value="25" aria-valuetext="색상 없음">
