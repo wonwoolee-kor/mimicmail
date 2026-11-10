@@ -175,9 +175,25 @@ fn deleted_keys(db: &Connection, owner: &str) -> Result<HashSet<String>> {
         .query_map([owner], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?)
 }
+pub(crate) fn conversation_deleted(db: &Connection, owner: &str, recipient: &str) -> Result<bool> {
+    db::exists(
+        db,
+        "SELECT 1 FROM deleted_messages WHERE owner=? AND message_key=?",
+        params![owner, format!("conversation:{recipient}")],
+    )
+}
+fn require_active_conversation(db: &Connection, owner: &str, recipient: &str) -> Result<()> {
+    if conversation_deleted(db, owner, recipient)? {
+        return Err(fault(404, "삭제된 대화입니다. 대화 목록을 새로고침하세요."));
+    }
+    Ok(())
+}
 pub fn conversation(db: &Connection, owner: &str, recipient: &str) -> Result<Value> {
     let owner = privacy::person_id(owner);
     let recipient = privacy::person_id(recipient);
+    if conversation_deleted(db, &owner, &recipient)? {
+        return Ok(json!({"messages":[],"timeline":[]}));
+    }
     let mut statement = db.prepare_cached("SELECT a.id FROM mail_archive a JOIN sent_mail s ON a.owner=s.owner AND a.fingerprint=s.fingerprint WHERE a.owner=? AND s.recipient=? ORDER BY a.sent_at,a.id")?;
     let ids = statement.query_map(params![owner, recipient], |r| r.get::<_, i64>(0))?;
     let messages = ids
@@ -200,6 +216,9 @@ pub(crate) fn index_conversation(
     recipient: &str,
     work: &crate::work::Work,
 ) -> Result<Value> {
+    if conversation_deleted(db, owner, recipient)? {
+        return Ok(json!({"messages":[],"timeline":[]}));
+    }
     let deleted = deleted_keys(db, owner)?;
     let mut messages = db::rows(db,
         "SELECT a.id,a.owner,a.fingerprint,a.subject,a.sent_at,a.revision,a.original_authored_body,a.context_json,
@@ -333,6 +352,9 @@ pub fn conversations_filtered(
     for contact in contacts.values() {
         let owner = text(contact, "owner");
         let recipient = text(contact, "recipient");
+        if conversation_deleted(db, owner, recipient)? {
+            continue;
+        }
         let name = text(contact, "name");
         let data = conversation(db, owner, recipient)?;
         let registered = manual
@@ -502,6 +524,7 @@ fn update_label_inner(db: &Connection, payload: &Value) -> Result<Value> {
         bail!("{message}");
     }
     let version = revision(payload, "라벨의 수정 버전이 올바르지 않습니다.")?;
+    require_active_conversation(db, &owner, &recipient)?;
     if version < 0 {
         bail!("라벨의 수정 버전이 올바르지 않습니다.");
     }
@@ -653,6 +676,7 @@ pub fn rename_conversation(db: &Connection, payload: &Value) -> Result<Value> {
         "대화를 다시 열어 이름을 수정하세요.",
     )?;
     let tx = immediate(db)?;
+    require_active_conversation(&tx, &owner, &recipient)?;
     let current = db::one(
         &tx,
         "SELECT name FROM manual_conversations WHERE owner=? AND recipient=?",
@@ -698,6 +722,7 @@ pub fn create_reply(db: &Connection, payload: &Value) -> Result<Value> {
     let owner = privacy::person_id(owner);
     let recipient = privacy::person_id(recipient);
     let tx = immediate(db)?;
+    require_active_conversation(&tx, &owner, &recipient)?;
     if !db::exists(
         &tx,
         "SELECT 1 FROM sent_mail WHERE owner=? AND recipient=? UNION ALL SELECT 1 FROM manual_conversations WHERE owner=? AND recipient=?",
@@ -728,6 +753,7 @@ pub fn update_reply(db: &Connection, payload: &Value) -> Result<Value> {
     let original_body = string(payload, "original_body", "답장을 다시 열어 수정하세요.")?;
     let body = reply_body(payload)?;
     let tx = immediate(db)?;
+    require_active_conversation(&tx, &owner, &recipient)?;
     let current = db::one(
         &tx,
         "SELECT body FROM received_replies WHERE id=? AND owner=? AND recipient=?",
@@ -749,6 +775,33 @@ pub fn update_reply(db: &Connection, payload: &Value) -> Result<Value> {
     )?;
     tx.commit()?;
     Ok(json!({"key":key}))
+}
+pub fn delete_conversation(db: &Connection, payload: &Value) -> Result<Value> {
+    let owner = string(payload, "owner", "삭제할 대화를 선택하세요.")?;
+    let recipient = string(payload, "recipient", "삭제할 대화를 선택하세요.")?;
+    if owner.trim().is_empty() || recipient.trim().is_empty() {
+        return Err(fault(400, "삭제할 대화를 선택하세요."));
+    }
+    let owner = privacy::person_id(owner);
+    let recipient = privacy::person_id(recipient);
+    let tx = immediate(db)?;
+    if !db::exists(
+        &tx,
+        "SELECT 1 FROM sent_mail WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM manual_conversations WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM received_replies WHERE owner=?1 AND recipient=?2",
+        params![owner, recipient],
+    )? {
+        return Err(fault(
+            404,
+            "대화를 찾을 수 없습니다. 대화 목록을 새로고침하세요.",
+        ));
+    }
+    // Scope the tombstone to one contact so shared sent mail remains in other chats.
+    tx.execute(
+        "INSERT OR IGNORE INTO deleted_messages(owner,message_key) VALUES (?,?)",
+        params![owner, format!("conversation:{recipient}")],
+    )?;
+    tx.commit()?;
+    Ok(json!({"deleted":true}))
 }
 pub fn delete_message(db: &Connection, payload: &Value) -> Result<Value> {
     let owner = string(payload, "owner", "삭제할 메시지 정보가 올바르지 않습니다.")?;
@@ -826,6 +879,7 @@ pub fn draft_context(
 ) -> Result<Value> {
     let owner = privacy::person_id(owner);
     let recipient = privacy::person_id(recipient);
+    require_active_conversation(db, &owner, &recipient)?;
     let data = conversation(db, &owner, &recipient)?;
     let active: Vec<_> = array(&data, "messages")
         .iter()
@@ -865,6 +919,7 @@ pub fn context_with_profile(
 ) -> Result<Value> {
     let owner = privacy::person_id(owner);
     let recipient = privacy::person_id(recipient);
+    require_active_conversation(db, &owner, &recipient)?;
     let data = conversation(db, &owner, &recipient)?;
     let manual = db::one(
         db,

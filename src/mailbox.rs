@@ -145,7 +145,9 @@ fn rebuild(db: &Connection, owner: &str, recipient: &str, work: &Work) -> Result
         .rev()
         .find(|i| i["kind"] != "received")
         .unwrap_or(&empty);
-    let summary = if items.is_empty() && manual.is_none() {
+    let summary = if gui::conversation_deleted(db, owner, recipient)?
+        || (items.is_empty() && manual.is_none())
+    {
         Value::Null
     } else {
         json!({"owner":owner,"recipient":recipient,"name":if name.is_empty(){recipient.split('@').next().unwrap_or("")}else{name},

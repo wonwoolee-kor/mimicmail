@@ -197,6 +197,7 @@ pub fn style_candidates(
          LEFT JOIN mail_archive a ON a.owner=s.owner AND a.fingerprint=s.fingerprint
          LEFT JOIN contact_labels l ON l.owner=s.owner AND l.recipient=s.recipient
          WHERE s.owner=?1 AND NOT EXISTS (SELECT 1 FROM deleted_messages d WHERE d.owner=s.owner AND d.message_key='sent:'||s.fingerprint)
+         AND NOT EXISTS (SELECT 1 FROM deleted_messages d WHERE d.owner=s.owner AND d.message_key='conversation:'||s.recipient)
          AND ((?3 AND s.recipient=?2) OR (NOT ?3 AND ?4!='unknown' AND ?4!='' AND l.label=?4))
          ORDER BY s.recipient,a.sent_at DESC,s.fingerprint",
         params![owner,recipient,existing,role])?;

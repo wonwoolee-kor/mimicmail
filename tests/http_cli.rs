@@ -654,3 +654,56 @@ fn http_stale_session_rejects_without_writing_and_fresh_token_saves_color() {
         .unwrap();
     assert_eq!(data["label_colors"]["교수"]["color"], "#b95f5b");
 }
+
+#[test]
+fn http_chat_delete_requires_token_and_removes_the_cached_conversation() {
+    let server = Server::start();
+    let client = client();
+    let token = server.token(&client);
+    let endpoint = format!("{}/api/conversation", server.url);
+    let payload = json!({"owner":"me@example.com","recipient":"boss@example.com"});
+    assert_eq!(
+        client
+            .delete(&endpoint)
+            .json(&payload)
+            .send()
+            .unwrap()
+            .status(),
+        403
+    );
+    let response = client
+        .delete(&endpoint)
+        .header("X-Mimicmail-Token", &token)
+        .json(&payload)
+        .send()
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.json::<Value>().unwrap(), json!({"deleted":true}));
+    let listed = client
+        .get(format!("{}/api/conversations?q=팀장", server.url))
+        .send()
+        .unwrap()
+        .json::<Value>()
+        .unwrap();
+    assert_eq!(listed["items"], json!([]));
+    let conversation = client
+        .get(&endpoint)
+        .query(&[
+            ("owner", "me@example.com"),
+            ("recipient", "boss@example.com"),
+            ("compact", "1"),
+            ("limit", "50"),
+        ])
+        .send()
+        .unwrap()
+        .json::<Value>()
+        .unwrap();
+    assert_eq!(conversation["timeline"], json!([]));
+    let db = db::open(&server.dbpath(), true).unwrap();
+    assert_eq!(
+        db::rows(&db, "SELECT id FROM mail_archive", [])
+            .unwrap()
+            .len(),
+        2
+    );
+}

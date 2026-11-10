@@ -247,6 +247,7 @@ async fn handle(
             ("PUT", "/api/contact-label", _) => gui::update_contact_label(&db, &payload)?,
             ("PUT", _, Some(id)) => gui::update_mail(&db, id, &payload)?,
             ("DELETE", "/api/message", _) => gui::delete_message(&db, &payload)?,
+            ("DELETE", "/api/conversation", _) => gui::delete_conversation(&db, &payload)?,
             _ => return Err(crate::fault(404, "페이지를 찾을 수 없습니다.")),
         };
         Ok(serde_json::to_vec(&result)?)

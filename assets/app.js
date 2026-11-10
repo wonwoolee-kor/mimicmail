@@ -7,6 +7,7 @@ const requests = new Map();
 const replies = new Map();
 let composerMode='request',replySaving=false;
 let replyEdit=null,replyEditSaving=false,renameContact=null,renameSaving=false;
+let conversationMenu=null,chatToDelete=null,chatDeleting=false;
 let listController, chatController, editorController;
 const icon = name => { const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); const use=document.createElementNS(svg.namespaceURI,'use'); use.setAttribute('href',`#${name}-icon`);svg.append(use);svg.setAttribute('aria-hidden','true');return svg; };
 function el(tag, cls, text){const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;}
@@ -93,6 +94,7 @@ let toastTimer;
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
 
 async function loadConversations({refreshChat=false,reveal=null}={}){
+  closeConversationMenu();
   const request=++state.listRequest;
   listController?.abort();listController=new AbortController();
   state.listPending=true;$('conversations').inert=true;syncComposer();
@@ -121,8 +123,10 @@ async function loadConversations({refreshChat=false,reveal=null}={}){
   finally{if(request===state.listRequest){state.listPending=false;$('conversations').inert=false;syncComposer();}}
 }
 function renderContacts(){
+  closeConversationMenu();
   const list=$('conversations');list.replaceChildren();
   state.data.items.forEach(item=>{
+    const wrapper=el('div','conversation-item');
     const row=button('',`conversation-row${sameContact(item,state.current)?' selected':''}`,()=>openConversation(item));
     row.setAttribute('aria-label',`${item.name}${item.label?`, ${item.label}`:''}`);
     row.setAttribute('aria-current',sameContact(item,state.current)?'true':'false');
@@ -134,11 +138,53 @@ function renderContacts(){
     if(item.label){const label=el('span','rank-chip',item.label);label.title=item.label;top.append(label);}
     content.append(top,preview);
     if(item.reply_count){const bottom=el('div','row-bottom'),badge=el('span','reply-badge');badge.append(icon('reply'),document.createTextNode('답장·인용'));bottom.append(badge);content.append(bottom);}
-    row.append(content);list.append(row);
+    const menu=button('⋯','icon-button conversation-menu-button',event=>openConversationMenu(item,menu,event));
+    menu.setAttribute('aria-label',`${item.name} 대화 메뉴`);menu.setAttribute('aria-haspopup','menu');menu.setAttribute('aria-controls','conversation-menu');
+    wrapper.addEventListener('contextmenu',event=>{event.preventDefault();openConversationMenu(item,menu,event);});
+    wrapper.addEventListener('keydown',event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){event.preventDefault();openConversationMenu(item,menu,event);}});
+    row.append(content);wrapper.append(row,menu);list.append(wrapper);
   });
   if(!state.data.items.length)list.append(el('div','empty-list',state.query||state.label||state.unlabeled?'검색 결과 없음':'메일 없음'));
 }
+function closeConversationMenu(restoreFocus=false){
+  if(!conversationMenu)return;
+  const {anchor}=conversationMenu;conversationMenu=null;
+  $('conversation-menu').hidden=true;anchor.closest('.conversation-item')?.classList.remove('menu-open');
+  if(restoreFocus&&anchor.isConnected)anchor.focus({preventScroll:true});
+}
+function openConversationMenu(contact,anchor,event){
+  if(state.listPending)return;
+  closeConversationMenu();conversationMenu={contact,anchor};
+  const menu=$('conversation-menu'),bounds=anchor.getBoundingClientRect();
+  menu.hidden=false;menu.setAttribute('aria-label',`${contact.name} 대화 메뉴`);anchor.closest('.conversation-item').classList.add('menu-open');
+  const pointer=event.type==='contextmenu'&&(event.clientX||event.clientY);
+  menu.style.left=`${Math.max(8,Math.min(pointer?event.clientX:bounds.right-menu.offsetWidth,innerWidth-menu.offsetWidth-8))}px`;
+  menu.style.top=`${Math.max(8,Math.min(pointer?event.clientY:bounds.bottom,innerHeight-menu.offsetHeight-8))}px`;
+  $('delete-chat-menu').focus({preventScroll:true});
+}
+function openDeleteChat(){
+  if(!conversationMenu)return;
+  const {contact}=conversationMenu;closeConversationMenu(true);chatToDelete=contact;
+  $('delete-chat-name').textContent=contact.name;$('delete-chat-error').hidden=true;
+  $('delete-chat-dialog').showModal();$('cancel-delete-chat').focus();
+}
+function closeDeleteChat(){if(!chatDeleting){$('delete-chat-dialog').close();chatToDelete=null;}}
+async function deleteChat(){
+  if(!chatToDelete||chatDeleting)return;
+  const contact=chatToDelete;chatDeleting=true;
+  $('confirm-delete-chat').disabled=$('cancel-delete-chat').disabled=true;$('delete-chat-error').hidden=true;
+  try{
+    await api('/api/conversation',{method:'DELETE',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:contact.owner,recipient:contact.recipient})});
+    $('delete-chat-dialog').close();chatToDelete=null;
+    for(const drafts of [requests,replies])drafts.delete(contactKey(contact));
+    if(sameContact(contact,state.current))clearConversation();
+    await loadConversations();
+    (document.querySelector('.conversation-row.selected')||$('new-chat')).focus({preventScroll:true});toast('대화 삭제됨');
+  }catch(e){$('delete-chat-error').textContent=e.message;$('delete-chat-error').hidden=false;}
+  finally{chatDeleting=false;$('confirm-delete-chat').disabled=$('cancel-delete-chat').disabled=false;}
+}
 async function openConversation(contact,keepScroll=false,showChat=true,page=null){
+  closeConversationMenu();
   if(showChat)document.querySelector('.app').classList.add('show-chat');
   if(!page&&sameContact(contact,state.current)&&state.reference&&!keepScroll&&state.loadedQuery===state.query){if(state.matchTotal)moveSearchMatch(0);$('timeline').focus({preventScroll:true});return;}
   const request=++state.chatRequest,query=state.query;const oldScroll=$('timeline').scrollTop;
@@ -439,6 +485,14 @@ $('new-chat-form').addEventListener('submit',event=>{event.preventDefault();crea
 $('cancel-new-chat').addEventListener('click',()=>{if(!state.creating)$('new-chat-dialog').close();});
 $('new-chat-dialog').addEventListener('cancel',event=>{if(state.creating)event.preventDefault();});
 $('cancel-delete').addEventListener('click',closeDelete);
+$('delete-chat-menu').addEventListener('click',openDeleteChat);
+$('cancel-delete-chat').addEventListener('click',closeDeleteChat);
+$('confirm-delete-chat').addEventListener('click',deleteChat);
+$('delete-chat-dialog').addEventListener('cancel',event=>{event.preventDefault();closeDeleteChat();});
+document.addEventListener('pointerdown',event=>{if(conversationMenu&&!$('conversation-menu').contains(event.target))closeConversationMenu();});
+document.addEventListener('keydown',event=>{if(!conversationMenu)return;if(event.key==='Escape'){event.preventDefault();closeConversationMenu(true);}else if(event.key==='Tab'){closeConversationMenu(true);}else if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();$('delete-chat-menu').focus();}});
+window.addEventListener('resize',()=>closeConversationMenu());
+document.addEventListener('scroll',()=>closeConversationMenu(),true);
 $('confirm-delete').addEventListener('click',deleteMessage);
 $('delete-dialog').addEventListener('cancel',event=>{event.preventDefault();closeDelete();});
 $('label-form').addEventListener('submit',event=>{event.preventDefault();saveLabel();});

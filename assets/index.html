@@ -108,6 +108,16 @@
       <footer class="label-footer"><button id="clear-label" type="button" class="text-button">라벨 지우기</button><button id="save-label" class="primary-button" type="submit">저장</button></footer>
     </form>
   </dialog>
+  <div id="conversation-menu" class="context-menu" role="menu" aria-label="대화 메뉴" hidden><button id="delete-chat-menu" type="button" role="menuitem"><svg aria-hidden="true"><use href="#delete-icon"/></svg>대화 삭제</button></div>
+  <dialog id="delete-chat-dialog" class="label-dialog" aria-labelledby="delete-chat-heading" aria-describedby="delete-chat-name delete-chat-description">
+    <div class="editor-heading"><h2 id="delete-chat-heading">대화를 삭제할까요?</h2></div>
+    <div class="delete-content">
+      <p id="delete-chat-name"></p>
+      <p id="delete-chat-description">대화와 문체 참조에서 삭제됩니다. 보관 원문은 유지됩니다.</p>
+      <p id="delete-chat-error" class="editor-error" role="alert" hidden></p>
+      <footer class="label-footer"><button id="cancel-delete-chat" class="text-button" autofocus>취소</button><button id="confirm-delete-chat" class="primary-button danger-button">대화 삭제</button></footer>
+    </div>
+  </dialog>
   <dialog id="delete-dialog" class="label-dialog" aria-labelledby="delete-heading" aria-describedby="delete-description">
     <div class="editor-heading"><h2 id="delete-heading">정말 삭제하시겠습니까?</h2></div>
     <div class="delete-content">
