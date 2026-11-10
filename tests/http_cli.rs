@@ -228,6 +228,73 @@ fn http_create_delete_validation_and_readonly_context() {
     assert_eq!(before, std::fs::read(server.dbpath()).unwrap());
 }
 #[test]
+fn http_reply_save_requires_token_and_is_available_to_readonly_context() {
+    let server = Server::start();
+    let client = client();
+    let token = server.token(&client);
+    let endpoint = format!("{}/api/reply", server.url);
+    let payload = json!({"owner":"me@example.com","recipient":"boss@example.com","body":"HTTP로 저장한 상대 답장"});
+    assert_eq!(
+        client
+            .post(&endpoint)
+            .json(&payload)
+            .send()
+            .unwrap()
+            .status(),
+        403
+    );
+    let saved = client
+        .post(&endpoint)
+        .header("X-Mimicmail-Token", &token)
+        .json(&payload)
+        .send()
+        .unwrap();
+    assert_eq!(saved.status(), 200);
+    let saved: Value = saved.json().unwrap();
+    let result = Command::new(BIN)
+        .args([
+            "--db",
+            server.dbpath().to_str().unwrap(),
+            "--user",
+            "me@example.com",
+            "context",
+            "--to",
+            "boss@example.com",
+            "--history-key",
+            saved["key"].as_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let context: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(
+        context["current_facts"]["conversation"][0]["body"],
+        payload["body"]
+    );
+    assert_eq!(context["style_references"], json!([]));
+    assert_eq!(
+        client
+            .post(&endpoint)
+            .header("X-Mimicmail-Token", &token)
+            .json(&json!({"owner":"me@example.com","recipient":"boss@example.com","body":"  "}))
+            .send()
+            .unwrap()
+            .status(),
+        400
+    );
+    assert_eq!(
+        client
+            .post(&endpoint)
+            .header("X-Mimicmail-Token", &token)
+            .json(&json!({"owner":"me@example.com","recipient":"missing","body":"내용"}))
+            .send()
+            .unwrap()
+            .status(),
+        404
+    );
+}
+
+#[test]
 fn oversized_http_bodies_and_unsupported_routes_are_rejected() {
     let server = Server::start();
     let client = client();

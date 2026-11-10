@@ -180,6 +180,7 @@ async fn handle(
             }
             ("GET", _, Some(id)) => gui::get_mail(&db, id)?,
             ("POST", "/api/conversation", _) => gui::create_conversation(&db, &payload)?,
+            ("POST", "/api/reply", _) => gui::create_reply(&db, &payload)?,
             ("PUT", "/api/contact-label", _) => gui::update_contact_label(&db, &payload)?,
             ("PUT", _, Some(id)) => gui::update_mail(&db, id, &payload)?,
             ("DELETE", "/api/message", _) => gui::delete_message(&db, &payload)?,

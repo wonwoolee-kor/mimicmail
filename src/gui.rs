@@ -161,7 +161,45 @@ pub fn conversation(db: &Connection, owner: &str, recipient: &str) -> Result<Val
     let messages = ids
         .map(|id| get_mail(db, id?))
         .collect::<Result<Vec<_>>>()?;
-    let timeline = timeline(&messages, &owner, &deleted_keys(db, &owner)?);
+    let deleted = deleted_keys(db, &owner)?;
+    let mut timeline = timeline(&messages, &owner, &deleted);
+    let replies = db::rows(
+        db,
+        "SELECT * FROM received_replies WHERE owner=? AND recipient=? ORDER BY sent_at,id",
+        params![owner, recipient],
+    )?;
+    if !replies.is_empty() {
+        let manual = db::one(
+            db,
+            "SELECT name FROM manual_conversations WHERE owner=? AND recipient=?",
+            params![owner, recipient],
+        )?;
+        let name = manual
+            .as_ref()
+            .map(|c| text(c, "name"))
+            .or_else(|| {
+                messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| m["context"]["recipient_names"][&recipient].as_str())
+            })
+            .unwrap_or("상대방");
+        for reply in replies {
+            let key = format!("received:{}", reply["id"]);
+            if deleted.contains(&key) {
+                continue;
+            }
+            let stamp = chrono::DateTime::parse_from_rfc3339(text(&reply, "sent_at"))?;
+            let index = timeline
+                .iter()
+                .position(|item| {
+                    chrono::DateTime::parse_from_rfc3339(text(item, "sent_at"))
+                        .is_ok_and(|date| date > stamp)
+                })
+                .unwrap_or(timeline.len());
+            timeline.insert(index, json!({"kind":"received","sender":recipient,"sender_name":name,"mine":false,"sent_at":reply["sent_at"],"subject":"","body":reply["body"],"source_ids":[],"has_reply":true,"keys":[key]}));
+        }
+    }
     Ok(json!({"messages":messages,"timeline":timeline}))
 }
 pub fn conversations(
@@ -262,6 +300,7 @@ pub fn conversations_filtered(
         if reply_count == 0 {
             reply_count = items.iter().filter(|m| m["kind"] == "quote").count();
         }
+        reply_count += items.iter().filter(|m| m["kind"] == "received").count();
         let match_info = first_search_match(items, &query);
         // Check one field at a time instead of concatenating every message body.
         let matches_query = query.is_empty()
@@ -532,6 +571,39 @@ pub fn create_conversation(db: &Connection, payload: &Value) -> Result<Value> {
         .ok_or_else(|| fault(404, "대화를 찾을 수 없습니다."))?;
     Ok(json!({"contact":contact,"created":true}))
 }
+pub fn create_reply(db: &Connection, payload: &Value) -> Result<Value> {
+    let owner = string(payload, "owner", "대화를 선택하세요.")?;
+    let recipient = string(payload, "recipient", "대화를 선택하세요.")?;
+    let body = string(payload, "body", "상대 답장을 입력하세요.")?;
+    if body.trim().is_empty() {
+        return Err(fault(400, "상대 답장을 입력하세요."));
+    }
+    let owner = privacy::person_id(owner);
+    let recipient = privacy::person_id(recipient);
+    let tx = immediate(db)?;
+    if !db::exists(
+        &tx,
+        "SELECT 1 FROM sent_mail WHERE owner=? AND recipient=? UNION ALL SELECT 1 FROM manual_conversations WHERE owner=? AND recipient=?",
+        params![owner, recipient, owner, recipient],
+    )? {
+        return Err(fault(
+            404,
+            "대화를 찾을 수 없습니다. 대화를 다시 선택하세요.",
+        ));
+    }
+    tx.execute(
+        "INSERT INTO received_replies(owner,recipient,body,sent_at) VALUES (?,?,?,?)",
+        params![
+            owner,
+            recipient,
+            privacy::redact(body),
+            Utc::now().to_rfc3339()
+        ],
+    )?;
+    let key = format!("received:{}", tx.last_insert_rowid());
+    tx.commit()?;
+    Ok(json!({"key":key}))
+}
 pub fn delete_message(db: &Connection, payload: &Value) -> Result<Value> {
     let owner = string(payload, "owner", "삭제할 메시지 정보가 올바르지 않습니다.")?;
     let recipient = string(
@@ -670,7 +742,9 @@ pub fn context_with_profile(
         } else { item["body"].clone() };
         json!({"key":item["keys"][0],"sender":item["sender"],"date":item["sent_at"],"subject":item["subject"],"body":body})
     }).collect();
-    let existing = !history.is_empty();
+    let existing = array(&data, "timeline")
+        .iter()
+        .any(|item| item["kind"] != "received");
     let styles =
         crate::pipeline::style_candidates(db, &owner, &recipient, text(profile, "role"), existing)?;
     let choose = |items: &[Value], ids: &[String], key: &str| -> Result<Vec<Value>> {
