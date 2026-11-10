@@ -46,6 +46,32 @@ fn existing_database_search_edit_labels_and_deletion_match_python() {
                 key => gui::conversations(&db, key.strip_prefix("search:").unwrap(), false, "")
                     .unwrap(),
             };
+            if key == "context" {
+                assert_eq!(actual["current_facts"]["conversation"], json!([]));
+                assert_eq!(actual["style_references"], json!([]));
+                assert_eq!(actual["recipient_context"], expected["recipient_context"]);
+                let keys: Vec<_> = array(&actual, "history_candidates")
+                    .iter()
+                    .map(|i| i["key"].as_str().unwrap().to_owned())
+                    .collect();
+                let mut selected = gui::selected_context(
+                    &db,
+                    "me@example.com",
+                    "boss@example.com",
+                    "other",
+                    &keys,
+                    &[],
+                )
+                .unwrap();
+                for fact in selected["current_facts"]["conversation"]
+                    .as_array_mut()
+                    .unwrap()
+                {
+                    fact.as_object_mut().unwrap().remove("key");
+                }
+                assert_eq!(selected["current_facts"], expected["current_facts"]);
+                continue;
+            }
             actual.as_object_mut().unwrap().remove("label_colors");
             if let Some(items) = actual.get_mut("items").and_then(Value::as_array_mut) {
                 for item in items {
@@ -82,7 +108,7 @@ fn read_only_context_does_not_write_or_create_database() {
     drop(db);
     let before = std::fs::read(&path).unwrap();
     let db = db::open(&path, true).unwrap();
-    assert_eq!(gui::draft_context(&db,"me@example.com","boss@example.com","other").unwrap()["current_facts"]["conversation"].as_array().unwrap().len(),2);
+    assert_eq!(gui::draft_context(&db,"me@example.com","boss@example.com","other").unwrap()["current_facts"]["conversation"].as_array().unwrap().len(),0);
     drop(db);
     assert_eq!(before, std::fs::read(&path).unwrap());
     let missing = tmp.path().join("missing.sqlite3");
@@ -240,7 +266,26 @@ fn new_recipient_style_does_not_copy_other_conversation_facts() {
     .unwrap();
     let data = gui::draft_context(&db, "me@example.com", "new@example.com", "other").unwrap();
     assert_eq!(data["current_facts"]["conversation"], json!([]));
-    assert_eq!(data["style_references"][0]["recipient"], "boss@example.com");
+    assert_eq!(data["style_candidates"][0]["recipient"], "boss@example.com");
+    assert_eq!(data["style_references"], json!([]));
+    let id = data["style_candidates"][0]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let selected = gui::selected_context(
+        &db,
+        "me@example.com",
+        "new@example.com",
+        "other",
+        &[],
+        &[id],
+    )
+    .unwrap();
+    assert_eq!(
+        selected["style_references"][0]["recipient"],
+        "boss@example.com"
+    );
+    assert_eq!(selected["current_facts"]["conversation"], json!([]));
     assert_eq!(
         gui::draft_context(&db, "other@example.com", "new@example.com", "other").unwrap()["style_references"],
         json!([])

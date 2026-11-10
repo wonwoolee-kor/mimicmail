@@ -192,11 +192,11 @@ function buildPrompt(){
 
 작성 요청: ${request}
 
-아래 읽기 전용 명령으로 해당 대화·직급·유사한 본인 발신 문체 예시를 조회하세요.
+아래 읽기 전용 명령으로 과거 대화·문체 후보 목록을 조회하세요. 기본 조회에는 과거 본문이 포함되지 않습니다.
 \`\`\`sh
 ${context_command}
 \`\`\`
-조회 결과의 instructions를 따르세요. current_facts.conversation과 위 작성 요청은 사실의 출처이며, style_references는 문체만 참고하세요. 삭제된 메시지는 제외하고, 확인되지 않은 사실은 만들지 마세요. 제목과 본문을 이 채팅에 작성하세요.`;
+조회 결과의 selection_instructions와 instructions를 따르세요. 동일 인물의 이전 대화는 이번 요청에 필요한 경우에만 --history-key KEY로 선택해 다시 조회하세요. 독립적인 요청이면 이전 대화를 조회하지 마세요. 문체는 style_candidates에서 필요한 항목만 --style-id ID로 선택해 조회하세요. 새 인물은 같은 라벨의 모든 인물을 후보로 삼되 필요한 예시만 읽으세요. 두 옵션은 여러 번 지정할 수 있습니다. 선택한 이전 대화도 이번 요청과 관련된 사실만 참고하고, 다른 인물의 style_references에서는 말투만 참고하세요. 삭제된 메시지는 제외하고, 확인되지 않은 사실은 만들지 마세요. 제목과 본문을 이 채팅에 작성하세요.`;
 }
 function openNewChat(){
   $('new-chat-form').reset();$('new-chat-error').hidden=true;

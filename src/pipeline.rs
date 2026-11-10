@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::{Result, bail};
 use chrono::NaiveDate;
-use rusqlite::{Connection, named_params, params};
+use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use std::{collections::HashSet, path::PathBuf};
 
@@ -35,13 +35,6 @@ pub const RELATIONSHIPS: [&str; 10] = [
 ];
 pub const CLASSIFY: &str = include_str!("../assets/classify.txt");
 pub const GENERATE: &str = include_str!("../assets/generate.txt");
-pub const STYLE_FIELDS: [&str; 5] = [
-    "recipient",
-    "role",
-    "relationship",
-    "purpose",
-    "authored_body",
-];
 pub fn profile_schema() -> Value {
     object_schema(
         json!({"purpose":{"type":"string","enum":PURPOSES},"role":{"type":"string"},"role_evidence":{"type":"string"},"relationship":{"type":"string","enum":RELATIONSHIPS},"relationship_evidence":{"type":"string"}}),
@@ -183,35 +176,28 @@ pub fn ingest(
 fn increment(value: &mut Value, key: &str) {
     value[key] = json!(value[key].as_u64().unwrap_or(0) + 1);
 }
-pub fn retrieve(
+pub fn style_candidates(
     db: &Connection,
     owner: &str,
     recipient: &str,
-    profile: &Value,
-    limit: usize,
+    role: &str,
+    existing: bool,
 ) -> Result<Vec<Value>> {
-    if limit < 1 {
-        bail!("검색 개수는 1 이상이어야 합니다.");
-    }
-    let mut statement = db.prepare_cached("SELECT *, recipient=:recipient AS same_recipient,
-        (relationship=:relationship AND :relationship!='unknown') AS same_relationship,
-        (role=:role AND :role!='unknown') AS same_role, (purpose=:purpose AND :purpose!='other') AS same_purpose
-        FROM sent_mail WHERE owner=:owner AND NOT EXISTS (SELECT 1 FROM deleted_messages d WHERE d.owner=sent_mail.owner AND d.message_key='sent:'||sent_mail.fingerprint)
-        AND (recipient=:recipient OR (relationship=:relationship AND :relationship!='unknown') OR (role=:role AND :role!='unknown') OR (purpose=:purpose AND :purpose!='other'))
-        ORDER BY same_recipient DESC,same_relationship DESC,same_role DESC,same_purpose DESC,fingerprint,recipient")?;
-    let mut rows = statement.query(named_params! {":owner":owner.trim().to_lowercase(),":recipient":recipient.trim().to_lowercase(),":role":text(profile,"role"),":relationship":text(profile,"relationship"),":purpose":text(profile,"purpose")})?;
-    let mut results = Vec::new();
+    // All people in the exact label are candidates; relationship/purpose cannot admit outsiders.
+    let styles = db::rows(db,
+        "SELECT s.*,a.subject,a.sent_at FROM sent_mail s
+         LEFT JOIN mail_archive a ON a.owner=s.owner AND a.fingerprint=s.fingerprint
+         LEFT JOIN contact_labels l ON l.owner=s.owner AND l.recipient=s.recipient
+         WHERE s.owner=?1 AND NOT EXISTS (SELECT 1 FROM deleted_messages d WHERE d.owner=s.owner AND d.message_key='sent:'||s.fingerprint)
+         AND ((?3 AND s.recipient=?2) OR (NOT ?3 AND ?4!='unknown' AND ?4!='' AND l.label=?4))
+         ORDER BY s.recipient,a.sent_at DESC,s.fingerprint",
+        params![owner,recipient,existing,role])?;
     let mut seen = HashSet::new();
-    while let Some(row) = rows.next()? {
-        let fingerprint: String = row.get("fingerprint")?;
-        if seen.insert(fingerprint) {
-            results.push(db::row_value(row)?);
-            if results.len() == limit {
-                break;
-            }
-        }
-    }
-    Ok(results)
+    let styles: Vec<_> = styles
+        .into_iter()
+        .filter(|s| seen.insert(text(s, "fingerprint").to_owned()))
+        .collect();
+    Ok(styles)
 }
 pub struct DraftOptions<'a> {
     pub owner: &'a str,
@@ -272,8 +258,55 @@ pub fn draft(
         profile["relationship"] = json!(relationship);
         profile["relationship_evidence"] = json!("사용자 지정 (--relationship)");
     }
-    let references = retrieve(db, &owner, &recipient, &profile, limit)?;
-    let mut result = llm.complete(GENERATE,&json!({"current_facts":{"user":owner,"recipient":recipient,"request":request,"conversation":mail.conversation()},"recipient_context":select(&profile,&["role","relationship","purpose"]),"style_references":references.iter().map(|r| select(r,&STYLE_FIELDS)).collect::<Vec<_>>()}),&draft_schema())?;
+    if limit < 1 {
+        bail!("검색 개수는 1 이상이어야 합니다.");
+    }
+    let mut context = crate::gui::context_with_profile(db, &owner, &recipient, &profile, &[], &[])?;
+    context["current_facts"]["request"] = json!(request);
+    context["current_facts"]["conversation"] = mail.conversation();
+    if !crate::array(&context, "history_candidates").is_empty()
+        || !crate::array(&context, "style_candidates").is_empty()
+    {
+        let schema = object_schema(json!({
+            "history_keys":{"type":"array","items":{"type":"string"}},
+            "style_ids":{"type":"array","items":{"type":"string"},"maxItems":limit}
+        }));
+        let choice = llm.complete(text(&context, "selection_instructions"), &context, &schema)?;
+        let ids = |key| -> Result<Vec<String>> {
+            choice[key]
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("참조 선택은 배열이어야 합니다."))?
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| anyhow::anyhow!("참조 식별자는 문자열이어야 합니다."))
+                })
+                .collect()
+        };
+        let history_keys = ids("history_keys")?;
+        let style_ids = ids("style_ids")?;
+        if style_ids.len() > limit {
+            bail!("선택한 문체 예시가 검색 개수를 초과했습니다.");
+        }
+        let selected = crate::gui::context_with_profile(
+            db,
+            &owner,
+            &recipient,
+            &profile,
+            &history_keys,
+            &style_ids,
+        )?;
+        context["current_facts"]["previous_conversation"] =
+            selected["current_facts"]["conversation"].clone();
+        context["style_references"] = selected["style_references"].clone();
+    }
+    let references = context["style_references"].clone();
+    let input = select(
+        &context,
+        &["current_facts", "recipient_context", "style_references"],
+    );
+    let mut result = llm.complete(GENERATE, &input, &draft_schema())?;
     if ["subject", "body"]
         .iter()
         .any(|k| text(&result, k).trim().is_empty())
@@ -288,6 +321,8 @@ pub fn draft(
     }
     result["classification"] = profile;
     result["style_sources"] = references
+        .as_array()
+        .unwrap()
         .iter()
         .map(|r| select(r, &["fingerprint", "message_id"]))
         .collect();

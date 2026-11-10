@@ -315,7 +315,7 @@ fn cli_missing_credentials_and_missing_readonly_db_have_no_side_effect() {
 fn cli_ingest_and_stdin_draft_use_rust_and_do_not_save_current_mail() {
     let tmp = tempfile::tempdir().unwrap();
     let executable = tmp.path().join("codex");
-    std::fs::write(&executable,"#!/bin/sh\ncat > /dev/null\nif /usr/bin/grep -q missing_facts schema.json; then\nprintf '%s' '{\"subject\":\"답장\",\"body\":\"금요일까지 전달드리겠습니다.\",\"missing_facts\":[]}' > result.json\nelse\nprintf '%s' '{\"purpose\":\"request\",\"role\":\"unknown\",\"role_evidence\":\"\",\"relationship\":\"unknown\",\"relationship_evidence\":\"\"}' > result.json\nfi\n").unwrap();
+    std::fs::write(&executable,"#!/bin/sh\ncat > /dev/null\nif /usr/bin/grep -q missing_facts schema.json; then\nprintf '%s' '{\"subject\":\"답장\",\"body\":\"금요일까지 전달드리겠습니다.\",\"missing_facts\":[]}' > result.json\nelif /usr/bin/grep -q history_keys schema.json; then\nprintf '%s' '{\"history_keys\":[],\"style_ids\":[]}' > result.json\nelse\nprintf '%s' '{\"purpose\":\"request\",\"role\":\"unknown\",\"role_evidence\":\"\",\"relationship\":\"unknown\",\"relationship_evidence\":\"\"}' > result.json\nfi\n").unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     let path = tmp.path().join("mail.sqlite3");
     let sent = tmp.path().join("sent.eml");

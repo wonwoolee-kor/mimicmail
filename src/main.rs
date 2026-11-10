@@ -57,6 +57,10 @@ enum Commands {
         to: String,
         #[arg(long,default_value="other",value_parser=pipeline::PURPOSES)]
         purpose: String,
+        #[arg(long)]
+        history_key: Vec<String>,
+        #[arg(long)]
+        style_id: Vec<String>,
     },
     #[command(about = "로컬 메일 보관함·편집기 열기")]
     Gui {
@@ -73,11 +77,24 @@ fn run(args: Args) -> Result<()> {
     let user = args
         .user
         .context("--user로 본인 이메일 주소를 지정하세요.")?;
-    if let Commands::Context { to, purpose } = args.command {
+    if let Commands::Context {
+        to,
+        purpose,
+        history_key,
+        style_id,
+    } = args.command
+    {
         let db = db::open(&args.db, true)?;
         println!(
             "{}",
-            serde_json::to_string_pretty(&gui::draft_context(&db, &user, &to, &purpose)?)?
+            serde_json::to_string_pretty(&gui::selected_context(
+                &db,
+                &user,
+                &to,
+                &purpose,
+                &history_key,
+                &style_id
+            )?)?
         );
         return Ok(());
     }

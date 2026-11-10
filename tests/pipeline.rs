@@ -78,7 +78,7 @@ fn aliases_multiple_recipients_and_repeat_ingestion_preserve_edits() {
         "편집한 문체"
     );
     assert_eq!(
-        pipeline::retrieve(&db, "me@example.com", "boss@example.com", &unknown(), 5)
+        pipeline::style_candidates(&db, "me@example.com", "boss@example.com", "unknown", true)
             .unwrap()
             .len(),
         1
@@ -178,93 +178,32 @@ fn verbatim_evidence_is_required() {
     assert_eq!(result["relationship"], "unknown");
 }
 #[test]
-fn retrieval_priority_owner_isolation_and_unknown_values() {
-    let db = memory();
-    for (fp, recipient, role, relation, purpose, owner) in [
-        (
-            "purpose",
-            "other@example.com",
-            "unknown",
-            "unknown",
-            "request",
-            "me@example.com",
-        ),
-        (
-            "role",
-            "other@example.com",
-            "팀장",
-            "unknown",
-            "thanks",
-            "me@example.com",
-        ),
-        (
-            "relation",
-            "other@example.com",
-            "unknown",
-            "superior",
-            "thanks",
-            "me@example.com",
-        ),
-        (
-            "recipient",
-            "boss@example.com",
-            "unknown",
-            "unknown",
-            "thanks",
-            "me@example.com",
-        ),
-        (
-            "another-owner",
-            "boss@example.com",
-            "unknown",
-            "unknown",
-            "request",
-            "stranger@example.com",
-        ),
-    ] {
-        db.execute(
-            "INSERT INTO sent_mail VALUES (?,?,?,?,?,?,?,?,?)",
-            rusqlite::params![
-                owner,
-                fp,
-                fp,
-                owner,
-                recipient,
-                role,
-                relation,
-                purpose,
-                format!("style {fp}")
-            ],
+fn existing_recipient_candidates_stay_with_that_recipient() {
+    let db = populated();
+    for recipient in ["boss@example.com", "peer@example.com"] {
+        gui::update_contact_label(
+            &db,
+            &json!({"owner":"me@example.com","recipient":recipient,"label":"교수","revision":0}),
         )
         .unwrap();
     }
-    let profile = json!({"role":"팀장","relationship":"superior","purpose":"request"});
-    let found = pipeline::retrieve(&db, "me@example.com", "boss@example.com", &profile, 5).unwrap();
-    assert_eq!(
-        found
-            .iter()
-            .map(|r| r["fingerprint"].as_str().unwrap())
-            .collect::<Vec<_>>(),
-        vec!["recipient", "relation", "role", "purpose"]
-    );
+    let found = pipeline::style_candidates(&db, "me@example.com", "boss@example.com", "교수", true)
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0]["recipient"], "boss@example.com");
     assert!(
-        pipeline::retrieve(
-            &db,
-            "me@example.com",
-            "new@example.com",
-            &json!({"role":"unknown","relationship":"unknown","purpose":"other"}),
-            5
-        )
-        .unwrap()
-        .is_empty()
+        pipeline::style_candidates(&db, "another@example.com", "boss@example.com", "교수", true)
+            .unwrap()
+            .is_empty()
     );
-    assert!(pipeline::retrieve(&db, "me@example.com", "new@example.com", &profile, 0).is_err());
 }
 #[test]
 fn draft_separates_current_facts_and_historical_style() {
     let db = populated();
+    let catalog = gui::draft_context(&db, "me@example.com", "boss@example.com", "request").unwrap();
     let mut llm = Fake::new(vec![
         unknown(),
+        json!({"history_keys":[],"style_ids":[catalog["style_candidates"][0]["fingerprint"]]}),
         json!({"subject":"회의 확인","body":"화요일에 뵙겠습니다.","missing_facts":[]}),
     ]);
     let raw = raw(
@@ -287,7 +226,7 @@ fn draft_separates_current_facts_and_historical_style() {
         },
     )
     .unwrap();
-    let data = &llm.calls[1].1;
+    let data = &llm.calls[2].1;
     assert!(!data["style_references"].to_string().contains("화요일"));
     assert!(!data["current_facts"].to_string().contains("중요한 답변"));
     assert_eq!(data["recipient_context"]["relationship"], "superior");
@@ -295,7 +234,7 @@ fn draft_separates_current_facts_and_historical_style() {
         result["classification"]["role_evidence"],
         "사용자 지정 (--role)"
     );
-    assert_eq!(array(&result, "style_sources").len(), 2);
+    assert_eq!(array(&result, "style_sources").len(), 1);
 }
 #[test]
 fn manual_role_applies_to_future_ingest_and_draft_override() {
@@ -320,6 +259,7 @@ fn manual_role_applies_to_future_ingest_and_draft_override() {
     for (role, expected) in [(None, "교수"), (Some("학과장"), "학과장")] {
         let mut llm = Fake::new(vec![
             unknown(),
+            json!({"history_keys":[],"style_ids":[]}),
             json!({"subject":"답장","body":"감사합니다.","missing_facts":[]}),
         ]);
         pipeline::draft(
@@ -336,7 +276,7 @@ fn manual_role_applies_to_future_ingest_and_draft_override() {
             },
         )
         .unwrap();
-        assert_eq!(llm.calls[1].1["recipient_context"]["role"], expected);
+        assert_eq!(llm.calls[2].1["recipient_context"]["role"], expected);
     }
 }
 #[test]

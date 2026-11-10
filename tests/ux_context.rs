@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use mimicmail::{array, db, gui};
+use mimicmail::{array, db, gui, pipeline, text};
 use serde_json::json;
 
 #[test]
@@ -84,4 +84,206 @@ fn search_returns_every_occurrence_with_browser_offsets() {
     assert_eq!(matches[1]["term"], "STRASSE");
     assert_eq!(gui::search_matches(&items, "교환학생").len(), 2);
     assert!(gui::search_matches(&items, "  ").is_empty());
+}
+
+#[test]
+fn history_is_opt_in_and_preserves_original_facts_separate_from_edited_style() {
+    let db = populated();
+    let mail = gui::get_mail(&db, 1).unwrap();
+    gui::update_mail(
+        &db,
+        1,
+        &json!({"revision":0,"authored_body":"편집된 문체입니다.","recipients":mail["recipients"]}),
+    )
+    .unwrap();
+    let catalog = gui::draft_context(&db, "me@example.com", "boss@example.com", "other").unwrap();
+    assert_eq!(catalog["current_facts"]["conversation"], json!([]));
+    assert_eq!(catalog["style_references"], json!([]));
+    assert!(!catalog.to_string().contains("편집된 문체입니다."));
+    let id = text(&catalog["style_candidates"][0], "fingerprint").to_owned();
+    let key = format!("sent:{id}");
+    let selected = gui::selected_context(
+        &db,
+        "me@example.com",
+        "boss@example.com",
+        "other",
+        std::slice::from_ref(&key),
+        std::slice::from_ref(&id),
+    )
+    .unwrap();
+    assert_eq!(array(&selected["current_facts"], "conversation").len(), 1);
+    assert_eq!(
+        selected["current_facts"]["conversation"][0]["body"],
+        mail["display_original_authored"]
+    );
+    assert_eq!(
+        selected["style_references"][0]["authored_body"],
+        "편집된 문체입니다."
+    );
+    gui::delete_message(
+        &db,
+        &json!({"owner":"me@example.com","recipient":"boss@example.com","key":key,"revision":1}),
+    )
+    .unwrap();
+    assert!(
+        gui::selected_context(
+            &db,
+            "me@example.com",
+            "boss@example.com",
+            "other",
+            &[key],
+            &[id]
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn new_person_candidates_cover_all_label_members_without_other_labels_or_owners() {
+    let db = memory();
+    for i in 0..9 {
+        let recipient = format!("person{i}@example.com");
+        let label = if i == 8 { "다른 라벨" } else { "교수" };
+        let owner = if i == 7 {
+            "another@example.com"
+        } else {
+            "me@example.com"
+        };
+        db.execute(
+            "INSERT INTO sent_mail VALUES (?,?,?,?,?,?,?,?,?)",
+            rusqlite::params![
+                owner,
+                format!("fp{i}"),
+                format!("id{i}"),
+                owner,
+                recipient,
+                label,
+                "peer",
+                "thanks",
+                format!("본문{i}")
+            ],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO contact_labels VALUES (?,?,?,1)",
+            rusqlite::params![owner, recipient, label],
+        )
+        .unwrap();
+    }
+    db.execute(
+        "INSERT INTO deleted_messages VALUES ('me@example.com','sent:fp6')",
+        [],
+    )
+    .unwrap();
+    gui::create_conversation(
+        &db,
+        &json!({"owner":"me@example.com","recipient":"new@example.com","label":"교수"}),
+    )
+    .unwrap();
+    let catalog = gui::draft_context(&db, "me@example.com", "new@example.com", "thanks").unwrap();
+    assert_eq!(array(&catalog, "style_candidates").len(), 6);
+    assert!(array(&catalog, "history_candidates").is_empty());
+    assert_eq!(catalog["style_references"], json!([]));
+    let selected = gui::selected_context(
+        &db,
+        "me@example.com",
+        "new@example.com",
+        "thanks",
+        &[],
+        &["fp5".into()],
+    )
+    .unwrap();
+    assert_eq!(array(&selected, "style_references").len(), 1);
+    assert_eq!(selected["style_references"][0]["authored_body"], "본문5");
+    assert_eq!(selected["current_facts"]["conversation"], json!([]));
+    for id in ["fp6", "fp7", "fp8"] {
+        assert!(
+            gui::selected_context(
+                &db,
+                "me@example.com",
+                "new@example.com",
+                "thanks",
+                &[],
+                &[id.into()]
+            )
+            .is_err()
+        );
+    }
+    assert!(
+        array(
+            &gui::draft_context(&db, "me@example.com", "unlabeled@example.com", "thanks").unwrap(),
+            "style_candidates"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn draft_model_can_skip_history_or_select_only_a_needed_message() {
+    let db = populated();
+    let catalog = gui::draft_context(&db, "me@example.com", "boss@example.com", "other").unwrap();
+    let key = catalog["history_candidates"][0]["key"].clone();
+    for keys in [json!([]), json!([key])] {
+        let mut llm = Fake::new(vec![
+            unknown(),
+            json!({"history_keys":keys,"style_ids":[]}),
+            json!({"subject":"초안","body":"감사합니다.","missing_facts":[]}),
+        ]);
+        pipeline::draft(
+            &db,
+            &mut llm,
+            &raw("boss@example.com", "me@example.com", "현재 요청", ""),
+            pipeline::DraftOptions {
+                owner: "me@example.com",
+                recipient: "boss@example.com",
+                request: "답장",
+                role: None,
+                relationship: None,
+                limit: 5,
+            },
+        )
+        .unwrap();
+        let generation = &llm.calls[2].1;
+        assert_eq!(
+            array(&generation["current_facts"], "previous_conversation").len(),
+            keys.as_array().unwrap().len()
+        );
+        assert_eq!(generation["style_references"], json!([]));
+        assert!(generation.get("history_candidates").is_none());
+        assert!(
+            !llm.calls[1]
+                .1
+                .to_string()
+                .contains("안녕하세요. 검토 부탁드립니다.")
+        );
+    }
+}
+
+#[test]
+fn invalid_model_reference_selection_never_reaches_generation() {
+    let db = populated();
+    for choice in [
+        json!({"history_keys":["sent:other-person"],"style_ids":[]}),
+        json!({"history_keys":[],"style_ids":["other-person"]}),
+        json!({"history_keys":[],"style_ids":["one","two"]}),
+    ] {
+        let mut llm = Fake::new(vec![unknown(), choice]);
+        assert!(
+            pipeline::draft(
+                &db,
+                &mut llm,
+                &raw("boss@example.com", "me@example.com", "현재 요청", ""),
+                pipeline::DraftOptions {
+                    owner: "me@example.com",
+                    recipient: "boss@example.com",
+                    request: "답장",
+                    role: None,
+                    relationship: None,
+                    limit: 1
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(llm.calls.len(), 2);
+    }
 }
