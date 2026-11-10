@@ -1,16 +1,17 @@
 # Mimicmail
 
-과거에 사용자가 보낸 이메일에서 수신자·관계·직책·목적이 유사한 문체 예시를 찾아 현재 대화에 맞는 초안을 작성합니다. Python 3.10 이상과 SQLite를 사용하며 실행 시 추가 Python 라이브러리는 필요하지 않습니다. 모델을 별도로 학습하지 않고, 검색된 발신 메일을 생성 시 참조합니다.
+과거에 사용자가 보낸 이메일에서 수신자·관계·직책·목적이 유사한 문체 예시를 찾아 현재 대화에 맞는 초안을 작성합니다. Rust와 SQLite를 사용합니다. 웹 화면과 SQLite 라이브러리는 실행 파일에 포함되며, 실행 시 Python이나 별도 서버 런타임이 필요하지 않습니다. 모델을 별도로 학습하지 않고, 검색된 발신 메일을 생성 시 참조합니다.
 
 ## 프로젝트 구조
 
 ```text
-src/mimicmail/  파싱·분류·검색·생성 코드
-               gui.py, static/ 채팅형 로컬 편집기
-tests/         자동 테스트
+src/           Rust 파싱·분류·검색·생성·HTTP 서버·CLI
+assets/        웹 화면, 모델 지시문, SQLite 스키마
+tests/         Rust 기능·HTTP·CLI·기존 데이터 호환성 테스트
 history/       과거 발신 .eml 보관용 선택 폴더
 data/          메일 본문·인용 대화·문체 참조 DB
-pyproject.toml 패키지 및 실행 명령 설정
+Cargo.toml     빌드 설정
+Cargo.lock     의존성 버전 고정
 Mimicmail.command  macOS 실행 파일
 ```
 
@@ -21,7 +22,7 @@ Mimicmail.command  macOS 실행 파일
 Finder에서 `Mimicmail.command`를 더블 클릭하거나 Codex에 “메일 GUI 열어줘”라고 요청합니다. 내부 실행 명령은 다음과 같습니다.
 
 ```sh
-.venv/bin/mimicmail gui
+./target/release/mimicmail gui
 ```
 
 기본 주소는 `http://127.0.0.1:8765`입니다. 이 기기에서만 접속하며 서버를 종료하려면 실행 중인 터미널에서 Ctrl+C를 누릅니다. 실행 중인 앱은 해당 주소로 다시 열 수 있습니다.
@@ -42,7 +43,7 @@ Finder에서 `Mimicmail.command`를 더블 클릭하거나 Codex에 “메일 GU
 ### 날짜를 지정해 저장
 
 ```sh
-.venv/bin/mimicmail --user me@example.com ingest /path/to/sent-mail --since 2026-01-01
+./target/release/mimicmail --user me@example.com ingest /path/to/sent-mail --since 2026-01-01
 ```
 
 `.eml`의 `Date` 헤더를 한국 시간으로 환산해 **2026-01-01 00:00부터 포함**합니다. 날짜가 없거나 해석할 수 없거나 시간대가 없는 메일은 날짜 조건을 확인할 수 없어 제외합니다. 파일 이름이나 수정 시각은 기준으로 사용하지 않습니다. 선택된 메일 안의 과거 인용 대화는 문맥 보존을 위해 함께 보관하되 별도 발신 메일로 색인하지 않습니다.
@@ -53,11 +54,10 @@ Finder에서 `Mimicmail.command`를 더블 클릭하거나 Codex에 “메일 GU
 
 기본 엔진은 **Codex CLI**입니다. 프로젝트 폴더에서 실행하며, `codex`가 설치되어 있고 로그인되어 있어야 합니다. ChatGPT 계정으로 Codex에 로그인한 경우 별도의 OpenAI API 키 설정은 필요하지 않습니다. Codex 앱에서 아래 작업을 자연어로 요청해도 됩니다.
 
-`src` 구조의 패키지는 프로젝트별 가상환경에 한 번 설치합니다. 이 작업도 Codex에서 실행하면 됩니다.
+빌드에는 Rust 도구 모음이 필요합니다. 프로젝트 폴더에서 실행 파일을 한 번 빌드합니다. 빌드한 바이너리는 Rust 설치 없이 실행할 수 있습니다. `Mimicmail.command`도 바이너리가 없으면 최초 빌드를 수행합니다. 소스를 수정한 뒤에는 아래 명령으로 다시 빌드합니다.
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
+cargo build --release --locked
 ```
 
 ### Codex 채팅에서 진행
@@ -94,13 +94,13 @@ Codex는 위 요청에 따라 다음과 같은 명령을 실행합니다. 직접
 codex login status
 
 # 폴더의 .eml을 재귀적으로 읽습니다. 수신 메일과 이미 저장한 파일은 건너뜁니다.
-.venv/bin/mimicmail --user me@example.com ingest ./history
+./target/release/mimicmail --user me@example.com ingest ./history
 
 # 기본 주소와 별칭을 같은 사용자로 저장합니다.
-.venv/bin/mimicmail --user me@example.com ingest ./history --alias me@work.example
+./target/release/mimicmail --user me@example.com ingest ./history --alias me@work.example
 
 # 수신 메일의 전체 본문(인용 대화 포함)과 작성 요청을 사실의 출처로 사용합니다.
-.venv/bin/mimicmail --user me@example.com draft /path/to/current.eml \
+./target/release/mimicmail --user me@example.com draft /path/to/current.eml \
   --to manager@example.com \
   --request '검토 의견에 감사하고 수정본을 2026년 11월 13일까지 전달하겠다고 답장' \
   --role 팀장 --relationship superior
@@ -109,7 +109,7 @@ codex login status
 GUI에서 복사한 프롬프트에는 다음 조회 명령이 실제 DB와 수신자의 경로·주소로 채워집니다. 서버 실행 여부와 관계없이 동작하며, DB를 읽기 전용으로 열고 AI 호출 없이 JSON을 반환합니다. 메일 목적이 정해졌다면 `--purpose request` 등으로 검색 기준을 보완할 수 있습니다.
 
 ```sh
-.venv/bin/mimicmail --db data/mimicmail.sqlite3 --user me@example.com context --to manager@example.com
+./target/release/mimicmail --db data/mimicmail.sqlite3 --user me@example.com context --to manager@example.com
 ```
 
 세션에서 원본 메일 바이트를 전달할 때는 파일 경로 대신 `draft -`를 사용하고 표준 입력에 `.eml` 데이터를 전달합니다. 출력 JSON을 Codex가 읽어 채팅에 보여주면 됩니다. 파일로 저장하는 단계는 없습니다.
@@ -129,7 +129,7 @@ Codex 모델은 `--model` 또는 `CODEX_MODEL`로 지정할 수 있으며, 생�
 ```sh
 export OPENAI_API_KEY='YOUR_API_KEY'
 export OPENAI_MODEL='YOUR_MODEL_ID'
-.venv/bin/mimicmail --backend openai --user me@example.com ingest ./history
+./target/release/mimicmail --backend openai --user me@example.com ingest ./history
 ```
 
 ## 처리 흐름
@@ -150,13 +150,28 @@ export OPENAI_MODEL='YOUR_MODEL_ID'
 
 Codex 연결은 공식 [비대화형 실행 문서](https://learn.chatgpt.com/docs/non-interactive-mode)의 `codex exec --output-schema`를 사용합니다. API 형식은 [Structured Outputs 공식 문서](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses)를 따릅니다.
 
+## 상시 실행과 리소스 관리
+
+- HTTP 서버는 단일 비동기 이벤트 루프에서 요청을 기다립니다. 자동 조회나 주기적인 메일 스캔은 수행하지 않습니다.
+- 동시 HTTP 연결은 최대 16개, DB 작업은 최대 2개입니다. DB 작업 슬롯이 차면 503을 반환하며 대기열을 계속 늘리지 않습니다.
+- HTTP 헤더는 5초, 연결 전체는 30초로 제한합니다. SQLite 잠금 대기는 2초이며, 요청의 SQL 실행은 10초가 지나면 진행 콜백에서 중단합니다.
+- JSON 변경 요청은 1,000,000바이트, 가져오는 메일과 표준 입력은 64 MiB, 모델 응답은 4 MiB까지 처리합니다. 초과 입력은 오류로 알립니다.
+- DB 연결·문장·요청 데이터는 작업 완료 시 해제합니다. 스키마 초기화는 서버 시작 시 한 번 수행하며 메일 본문을 전역 캐시에 계속 쌓지 않습니다.
+- 브라우저는 대화 표시용 본문과 메타데이터를 받고, 원문·편집 자료는 편집기를 열 때 조회합니다. 검색·대화 전환 시 이전 조회를 취소하며, 편집기를 닫으면 보관하던 원문을 해제합니다.
+- Codex 호출은 180초, API 호출은 120초로 제한합니다. Codex 표준 출력·오류를 메모리에 누적하지 않으며, 제한 시간에는 자식 프로세스 그룹을 종료하고 임시 파일을 정리합니다.
+- 기존 SQLite 스키마, 편집본, 수정 버전과 논리 삭제 키를 유지합니다. Rust 이관을 위해 기존 메일을 다시 색인할 필요가 없습니다.
+
+이 제한은 동시 작업과 입력 크기를 제어합니다. 전체 메모리에 고정된 상한을 보장하지는 않습니다. 대화 목록·검색은 현재 보관함을 조회하고, 선택한 대화는 전체 타임라인을 구성하므로 메일 수와 본문 크기에 따라 작업 메모리가 달라집니다. 작성 요청은 기존처럼 열린 페이지 메모리에만 유지하며 자동으로 삭제하지 않습니다.
+
 ## 검증
 
 ```sh
-.venv/bin/python -m unittest discover -s tests -v
+cargo test --locked
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
 ```
 
-테스트용 메일과 임시 데이터베이스를 사용하며 외부 API를 호출하지 않습니다. MIME 파싱, 인용문 분리, 날짜·시간대 경계, 수신 메일 제외, 별칭, 중복 색인, 여러 수신자 처리, 사용자별 격리, 검색 우선순위, 사실/문체 입력 분리, 원문 보존, 중복 인용 제거, 직접 지정한 직급 적용, 편집·충돌 감지, 로컬 HTTP 접근 및 CLI 전체 흐름을 확인합니다.
+테스트용 메일과 임시 데이터베이스, 가짜 Codex 프로세스를 사용하며 외부 API를 호출하지 않습니다. `tests/fixtures/`에는 기존 Python 구현에서 생성한 합성 자료와 기대 결과를 보관해 SQLite·검색·삭제 키·MIME 파싱의 호환성을 검증합니다. 테스트 실행에도 Python은 필요하지 않습니다. MIME 파싱, 인용문 분리, 날짜·시간대 경계, 수신 메일 제외, 별칭, 중복 색인, 여러 수신자 처리, 사용자별 격리, 검색 우선순위, 사실/문체 입력 분리, 원문 보존, 중복 인용 제거, 직접 지정한 직급 적용, 편집·충돌 감지, 로컬 HTTP 접근 및 CLI 전체 흐름을 확인합니다.
 
 ## GitHub에 올리기 전 확인
 
@@ -169,4 +184,4 @@ git status --short --untracked-files=all
 git status --short --ignored
 ```
 
-새로 내려받은 프로젝트에서는 위의 가상환경 설치 과정을 진행합니다. `data/`는 실행 시 자동 생성되며, `history/`를 사용하려면 직접 만들거나 기존 메일 보관 폴더를 지정합니다.
+새로 내려받은 프로젝트에서는 위의 Rust 빌드 과정을 진행합니다. `data/`는 실행 시 자동 생성되며, `history/`를 사용하려면 직접 만들거나 기존 메일 보관 폴더를 지정합니다.

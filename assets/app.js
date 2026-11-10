@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 const state = {data:null, current:null, messages:[], timeline:[], reference:null, creating:false, query:'', replies:false, label:'', labelSaving:false, deleting:null, deleteSaving:false, listRequest:0, chatRequest:0, editing:null, dirty:false, saving:false};
 const requests = new Map();
+let listController, chatController, editorController;
 const icon = name => { const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); const use=document.createElementNS(svg.namespaceURI,'use'); use.setAttribute('href',`#${name}-icon`);svg.append(use);svg.setAttribute('aria-hidden','true');return svg; };
 function el(tag, cls, text){const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;}
 function button(label,cls,fn){const b=el('button',cls,label);b.type='button';b.addEventListener('click',fn);return b;}
@@ -39,10 +40,11 @@ async function api(path, options={}){const response=await fetch(path,options);co
 
 async function loadConversations({refreshChat=false}={}){
   const request=++state.listRequest;
+  listController?.abort();listController=new AbortController();
   $('list-status').textContent='불러오는 중…';
   $('refresh').disabled=true;
   try{
-    const data=await api(`/api/conversations?${new URLSearchParams({q:state.query,replies:state.replies?'1':'0',label:state.label})}`);
+    const data=await api(`/api/conversations?${new URLSearchParams({q:state.query,replies:state.replies?'1':'0',label:state.label})}`,{signal:listController.signal});
     if(request!==state.listRequest)return;
     state.data=data;$('new-chat').disabled=false;
     $('library-summary').textContent=`보낸 메일 ${data.total_mails}통 · ${data.total_conversations}개의 대화`;
@@ -81,6 +83,8 @@ async function openConversation(contact,keepScroll=false){
   document.querySelector('.app').classList.add('show-chat');
   if(sameContact(contact,state.current)&&state.reference&&!keepScroll){showSearchMatch(contact);return;}
   const request=++state.chatRequest;const oldScroll=$('timeline').scrollTop;
+  chatController?.abort();chatController=new AbortController();editorController?.abort();
+  state.messages=[];state.timeline=[];
   state.current=contact;renderContacts();
   $('contact-name').textContent=contact.name;
   $('contact-email').textContent=contact.recipient;$('contact-email').hidden=false;
@@ -91,7 +95,7 @@ async function openConversation(contact,keepScroll=false){
   $('prompt-request').value=requests.get(contactKey(contact))||'';
   if(!keepScroll){$('timeline').replaceChildren(...Array.from({length:3},()=>el('div','loading-line')));}
   try{
-    const data=await api(`/api/conversation?${new URLSearchParams({owner:contact.owner,recipient:contact.recipient})}`);
+    const data=await api(`/api/conversation?${new URLSearchParams({owner:contact.owner,recipient:contact.recipient,compact:'1'})}`,{signal:chatController.signal});
     if(request!==state.chatRequest)return;
     state.messages=data.messages;state.timeline=data.timeline;state.reference=data.prompt_reference;renderTimeline();error('');
     $('copy-prompt').disabled=false;$('prompt-request').disabled=false;
@@ -233,7 +237,11 @@ function profileField(label,name,value,options){
   Object.entries(options).forEach(([key,text])=>{const option=el('option','',text);option.value=key;input.append(option);});
   input.value=value;input.addEventListener('input',markDirty);wrap.append(input);return wrap;
 }
-function openEditor(mail,tab){
+async function openEditor(mail,tab){
+  editorController?.abort();const controller=editorController=new AbortController();
+  try{mail=await api(`/api/mail/${mail.id}`,{signal:controller.signal});}
+  catch(e){if(e.name!=='AbortError')error(e.message);return;}
+  if(controller.signal.aborted)return;
   state.editing=mail;state.dirty=false;state.saving=false;$('tab-edit').disabled=mail.deleted;
   $('editor-subject').textContent=mail.subject||'(제목 없음)';$('editor-date').textContent=`${fullDate(mail.sent_at)} ${clockTime(mail.sent_at)}`;
   $('edit-body').value=mail.display_body;$('editor-error').hidden=true;$('save').disabled=true;$('save').textContent='변경 저장';
@@ -246,7 +254,7 @@ function openEditor(mail,tab){
 }
 function markDirty(){state.dirty=true;$('save').disabled=state.saving;$('edit-status').textContent='저장 안 됨';}
 function setSaving(value){state.saving=value;for(const input of $('editor').querySelectorAll('textarea,select,input,#restore-body'))input.disabled=value;$('save').disabled=value||!state.dirty;$('save').textContent=value?'저장 중…':'변경 저장';}
-function closeEditor(){if(state.saving)return;if(state.dirty&&!confirm('변경 사항을 버리고 닫을까요?'))return;state.dirty=false;$('editor').close();}
+function closeEditor(){if(state.saving)return;if(state.dirty&&!confirm('변경 사항을 버리고 닫을까요?'))return;state.dirty=false;state.editing=null;$('editor').close();$('edit-body').value='';$('original-body').textContent='';$('recipient-fields').replaceChildren();}
 async function save(){
   if(!state.dirty||state.saving)return;
   const body=$('edit-body').value;if(!body.trim()){showEditorError('문체 참조 본문을 입력하세요.');return;}
@@ -260,7 +268,7 @@ async function save(){
 }
 function showEditorError(message){$('editor-error').textContent=message;$('editor-error').hidden=false;}
 let searchTimer;
-$('search').addEventListener('input',()=>{state.query=$('search').value;clearSearchMatch();clearTimeout(searchTimer);++state.listRequest;searchTimer=setTimeout(()=>loadConversations(),180);});
+$('search').addEventListener('input',()=>{state.query=$('search').value;clearSearchMatch();clearTimeout(searchTimer);++state.listRequest;listController?.abort();searchTimer=setTimeout(()=>loadConversations(),180);});
 $('prompt-request').addEventListener('input',()=>{if(!state.current)return;const key=contactKey(state.current),value=$('prompt-request').value;if(value)requests.set(key,value);else requests.delete(key);});
 for(const [id,replies] of [['filter-all',false],['filter-replies',true]]){$(id).addEventListener('click',()=>{state.replies=replies;for(const [other,value] of [['filter-all',false],['filter-replies',true]]){$(other).classList.toggle('active',replies===value);$(other).setAttribute('aria-pressed',String(replies===value));}loadConversations();});}
 $('refresh').addEventListener('click',()=>loadConversations({refreshChat:true}));

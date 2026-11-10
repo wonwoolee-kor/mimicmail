@@ -1,0 +1,447 @@
+[
+  {
+    "name": "plain",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <plain@example.com>\nCc: peer@example.com\nMIME-Version: 1.0\nContent-Type: multipart/alternative;\n boundary=\"===============5665326424379488650==\"\n\n--===============5665326424379488650==\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\n\n검토 부탁드립니다.\n감사합니다.\n\n--===============5665326424379488650==\nContent-Type: text/html; charset=\"utf-8\"\nContent-Transfer-Encoding: 7bit\nMIME-Version: 1.0\n\n<p>HTML alternative</p>\n\n--===============5665326424379488650==--\n",
+    "expected": {
+      "fingerprint": "4af89631f2130a4ccc23e4f2af3184662e1f17c7e22d751a202719c48f9d5cda",
+      "message_id": "<plain@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [
+        "peer@example.com"
+      ],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "검토 부탁드립니다.\n감사합니다.",
+      "authored_body": "검토 부탁드립니다.\n감사합니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": []
+      }
+    }
+  },
+  {
+    "name": "attachment",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <attachment@example.com>\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"===============4038261157051954962==\"\n\n--===============4038261157051954962==\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\n\n본문\n\n--===============4038261157051954962==\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nContent-Disposition: attachment; filename=\"note.txt\"\nMIME-Version: 1.0\n\n첨부파일 비밀\n\n--===============4038261157051954962==--\n",
+    "expected": {
+      "fingerprint": "331f1925225e7abcdf8869da06e00ab4bee0585c2a73fc8ee8d7ef91aa9f1acc",
+      "message_id": "<attachment@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "본문",
+      "authored_body": "본문",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": []
+      }
+    }
+  },
+  {
+    "name": "quote",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <quote@example.com>\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nMIME-Version: 1.0\n\n제 문체입니다.\n\nOn Monday, Boss wrote:\n> 상대방 문체\n",
+    "expected": {
+      "fingerprint": "efb5a0a2a4f37b34c98800562c5d9ef53f13f9dac92de993b960f35873e3a3ef",
+      "message_id": "<quote@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "제 문체입니다.\n\nOn Monday, Boss wrote:\n> 상대방 문체",
+      "authored_body": "제 문체입니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "sent_at": "",
+            "subject": "",
+            "body": "> 상대방 문체"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "html",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <html@example.com>\nContent-Type: text/html; charset=\"utf-8\"\nContent-Transfer-Encoding: base64\nMIME-Version: 1.0\n\nPGh0bWw+PGhlYWQ+PHN0eWxlPmhpZGRlbjwvc3R5bGU+PC9oZWFkPjxib2R5PjxwPuyViOuFle2V\nmOyEuOyalC48L3A+PHA+6rKA7YagIOu2gO2DgeuTnOumveuLiOuLpC48L3A+PGRpdiBjbGFzcz0i\nZ21haWxfcXVvdGUiPjxkaXY+7IOB64yA67CpIOq4gDwvZGl2PjwvZGl2PjxibG9ja3F1b3RlPuuL\npOuluCDsnbjsmqnrrLg8L2Jsb2NrcXVvdGU+PHNjcmlwdD5iYWQoKTwvc2NyaXB0PjwvYm9keT48\nL2h0bWw+Cg==\n",
+    "expected": {
+      "fingerprint": "f5e3110e6b158d92edac96dca187785625a0e47e36f623060bf93e94820f1e23",
+      "message_id": "<html@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "안녕하세요.\n\n검토 부탁드립니다.\n\n\n상대방 글\n\n다른 인용문",
+      "authored_body": "안녕하세요.\n\n검토 부탁드립니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "body": "상대방 글\n\n다른 인용문"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "outlook",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <outlook@example.com>\nContent-Type: text/html; charset=\"utf-8\"\nContent-Transfer-Encoding: base64\nMIME-Version: 1.0\n\nPGRpdj7rgrQg66y47J6lPC9kaXY+PGRpdiBpZD0iZGl2UnBseUZ3ZE1zZyI+RnJvbTogQm9zczwv\nZGl2PjxwPuyYmyDrqZTsnbwg64K07JqpPC9wPgo=\n",
+    "expected": {
+      "fingerprint": "8c817d0e0b4f3817a74cb351a16192a11bfeb8593471fab0af5e3971ec03e482",
+      "message_id": "<outlook@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "내 문장\nFrom: Boss\n옛 메일 내용",
+      "authored_body": "내 문장",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "body": "From: Boss\n옛 메일 내용"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "htmlquote",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <htmlquote@example.com>\nMIME-Version: 1.0\nContent-Type: multipart/alternative;\n boundary=\"===============5447814981113327705==\"\n\n--===============5447814981113327705==\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: base64\n\n6rCQ7IKs7ZWp64uI64ukLgotLS0tLU9yaWdpbmFsIE1lc3NhZ2UtLS0tLUZyb206IGJvc3NAZXhh\nbXBsZS5jb21UbzogbWVAZXhhbXBsZS5jb21TZW50OiAyMDI2LTAxLTAxIDEwOjAwOjAwIChVVEMr\nMDk6MDApU3ViamVjdDog7J287KCV67O466y4Cg==\n\n--===============5447814981113327705==\nContent-Type: text/html; charset=\"utf-8\"\nContent-Transfer-Encoding: base64\nMIME-Version: 1.0\n\nPHA+6rCQ7IKs7ZWp64uI64ukLjwvcD48cD4tLS0tLU9yaWdpbmFsIE1lc3NhZ2UtLS0tLTwvcD48\ncD5Gcm9tOiDqtZDsiJggJmx0O2Jvc3NAZXhhbXBsZS5jb20mZ3Q7PC9wPjxwPlRvOiBtZUBleGFt\ncGxlLmNvbTwvcD48cD5TZW50OiAyMDI2LTAxLTAxIDEwOjAwOjAwIChVVEMrMDk6MDApPC9wPjxw\nPlN1YmplY3Q6IOydvOyglTwvcD48cD7quIjsmpTsnbzsl5Ag66eM64KY7JqULjwvcD4K\n\n--===============5447814981113327705==--\n",
+    "expected": {
+      "fingerprint": "e2be9031b6af75c42000c47176103fa78e49ac463da001c5be2b681e4e0c8880",
+      "message_id": "<htmlquote@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "감사합니다.\n-----Original Message-----From: boss@example.comTo: me@example.comSent: 2026-01-01 10:00:00 (UTC+09:00)Subject: 일정본문",
+      "authored_body": "감사합니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "boss@example.com",
+            "sender_name": "교수",
+            "date": "2026-01-01 10:00:00 (UTC+09:00)",
+            "sent_at": "2026-01-01T10:00:00+09:00",
+            "subject": "일정",
+            "body": "금요일에 만나요."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "marker0",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <marker0@example.com>\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nMIME-Version: 1.0\n\n작성한 문장.\n감사합니다.\n\nOn Monday,\nBoss wrote:\n상대방 문장\n",
+    "expected": {
+      "fingerprint": "f780d8a67a604db27f19ed760286d2d3fb3a7ee850a88c1b3577a9636a8a5bce",
+      "message_id": "<marker0@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "작성한 문장.\n감사합니다.\n\nOn Monday,\nBoss wrote:\n상대방 문장",
+      "authored_body": "작성한 문장.\n감사합니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "body": "On Monday,\nBoss wrote:\n상대방 문장"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "marker1",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <marker1@example.com>\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nMIME-Version: 1.0\n\n작성한 문장.\n감사합니다.\n\n2026년 11월 9일 팀장님이 작성:\n상대방 문장\n",
+    "expected": {
+      "fingerprint": "82d5a3b0f51ce9b0ffe11b5e6e4ca8e51412344d19a040a44cfa96c5882da67f",
+      "message_id": "<marker1@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "작성한 문장.\n감사합니다.\n\n2026년 11월 9일 팀장님이 작성:\n상대방 문장",
+      "authored_body": "작성한 문장.\n감사합니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "sent_at": "",
+            "subject": "",
+            "body": "상대방 문장"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "marker2",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <marker2@example.com>\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nMIME-Version: 1.0\n\n작성한 문장.\n감사합니다.\n\n-----Original Message-----\n상대방 문장\n",
+    "expected": {
+      "fingerprint": "fe9e3ed499e5b9225acd823807a788115fc914bc896c48d0e928eaff0b54b81a",
+      "message_id": "<marker2@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "작성한 문장.\n감사합니다.\n\n-----Original Message-----\n상대방 문장",
+      "authored_body": "작성한 문장.\n감사합니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "sent_at": "",
+            "subject": "",
+            "body": "상대방 문장"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "marker3",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <marker3@example.com>\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nMIME-Version: 1.0\n\n작성한 문장.\n감사합니다.\n\n-------- 원본 메시지 --------\n상대방 문장\n",
+    "expected": {
+      "fingerprint": "0f4eec66fdc6cfd349ccf4403f81c2aa5944411f6cf4b979f966de457bab6596",
+      "message_id": "<marker3@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "작성한 문장.\n감사합니다.\n\n-------- 원본 메시지 --------\n상대방 문장",
+      "authored_body": "작성한 문장.\n감사합니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "sent_at": "",
+            "subject": "",
+            "body": "상대방 문장"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "marker4",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <marker4@example.com>\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nMIME-Version: 1.0\n\n작성한 문장.\n감사합니다.\n\nBegin forwarded message:\n상대방 문장\n",
+    "expected": {
+      "fingerprint": "f02c513b5fda0e2f2b9147df800c7553ec0eddc18d82b2a570bad21caeb06b8d",
+      "message_id": "<marker4@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "작성한 문장.\n감사합니다.\n\nBegin forwarded message:\n상대방 문장",
+      "authored_body": "작성한 문장.\n감사합니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "sent_at": "",
+            "subject": "",
+            "body": "상대방 문장"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "marker5",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <marker5@example.com>\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nMIME-Version: 1.0\n\n작성한 문장.\n감사합니다.\n\n보낸 사람: 팀장\n보낸 날짜: 월요일\n받는 사람: 나\n제목: 요청\n상대방 문장\n",
+    "expected": {
+      "fingerprint": "61d520d11c2aec16b42661f63462eba4afd28d0859924d2d0559935e14a27a4a",
+      "message_id": "<marker5@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "작성한 문장.\n감사합니다.\n\n보낸 사람: 팀장\n보낸 날짜: 월요일\n받는 사람: 나\n제목: 요청\n상대방 문장",
+      "authored_body": "작성한 문장.\n감사합니다.",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "body": "보낸 사람: 팀장\n보낸 날짜: 월요일\n받는 사람: 나\n제목: 요청\n상대방 문장"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "inline",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: =?utf-8?b?7YyA7J6l?= <BOSS@example.com>\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <inline@example.com>\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nMIME-Version: 1.0\n\n> 相手の質問\n私の返事\n",
+    "expected": {
+      "fingerprint": "37cdcb28acaab62e2e43457a5f320a50d6e982454bcc572312fbbe766934b392",
+      "message_id": "<inline@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "boss@example.com"
+      ],
+      "cc": [],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "> 相手の質問\n私の返事",
+      "authored_body": "私の返事",
+      "context": {
+        "recipient_names": {
+          "boss@example.com": "팀장"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": [
+          {
+            "sender": "",
+            "sender_name": "",
+            "date": "",
+            "body": "相手の質問"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "group",
+    "raw": "From: =?utf-8?b?64KY?= <ME@example.com>\nTo: Team: \"Doe, Jane\" <Jane@example.com>, Peer <peer@example.com>;\nSubject: =?utf-8?b?6rKA7YagIOyalOyyrQ==?=\nMessage-ID: <group@example.com>\nCc: JANE@example.com\nContent-Type: text/plain; charset=\"utf-8\"\nContent-Transfer-Encoding: 8bit\nMIME-Version: 1.0\n\n내 문장\n",
+    "expected": {
+      "fingerprint": "c998c8e6a81f404c397a82f41c3392b7b7fc14d3490787529ddaf4299ecfcee3",
+      "message_id": "<group@example.com>",
+      "sender": "me@example.com",
+      "to": [
+        "jane@example.com",
+        "peer@example.com"
+      ],
+      "cc": [
+        "jane@example.com"
+      ],
+      "subject": "검토 요청",
+      "date": "",
+      "body": "내 문장",
+      "authored_body": "내 문장",
+      "context": {
+        "recipient_names": {
+          "jane@example.com": "Doe, Jane",
+          "peer@example.com": "Peer"
+        },
+        "in_reply_to": "",
+        "references": [],
+        "quotes": []
+      }
+    }
+  }
+]

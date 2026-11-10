@@ -1,0 +1,79 @@
+{
+  "sent_mail": [
+    {
+      "owner": "me@example.com",
+      "fingerprint": "e5cfe2b5e2abfa5fd6410853c5b269da85bd3fdf8bb0cb82073dc40453a4d3dc",
+      "message_id": "",
+      "sender": "me@example.com",
+      "recipient": "boss@example.com",
+      "role": "교수",
+      "relationship": "superior",
+      "purpose": "thanks",
+      "authored_body": "앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß 앞부분 😀ß Straße <검토> 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용 뒤의 내용"
+    },
+    {
+      "owner": "me@example.com",
+      "fingerprint": "13d15b9c49d31dcfaf350479ceb4fe4f680ad649c3a42485dbf3ff1d4975af36",
+      "message_id": "",
+      "sender": "me@example.com",
+      "recipient": "peer@example.com",
+      "role": "unknown",
+      "relationship": "unknown",
+      "purpose": "request",
+      "authored_body": "안녕하세요. 검토 부탁드립니다.\n감사합니다."
+    }
+  ],
+  "mail_archive": [
+    {
+      "id": 1,
+      "owner": "me@example.com",
+      "fingerprint": "e5cfe2b5e2abfa5fd6410853c5b269da85bd3fdf8bb0cb82073dc40453a4d3dc",
+      "subject": "답장 메일",
+      "sent_at": "2026-01-01T10:00:00+09:00",
+      "sender": "me@example.com",
+      "to_json": "[\"boss@example.com\"]",
+      "cc_json": "[]",
+      "original_body": "안녕하세요. 검토 부탁드립니다.\n감사합니다.\n\n-----Original Message-----From: \"팀장\" &lt;boss@example.com&gt;To: &lt;me@example.com&gt;;Sent: 2025-12-31 11:00:00 (UTC+09:00)Subject: 이전 요청\n상대방이 작성한 중요한 답변입니다.",
+      "original_authored_body": "안녕하세요. 검토 부탁드립니다.\n감사합니다.",
+      "source_name": "답장 메일.eml",
+      "revision": 2,
+      "updated_at": "2026-11-10T03:51:26.621934+00:00",
+      "context_json": "{\"recipient_names\": {\"boss@example.com\": \"팀장\"}, \"in_reply_to\": \"<incoming@example.com>\", \"references\": [\"<earlier@example.com>\", \"<incoming@example.com>\"], \"quotes\": [{\"sender\": \"boss@example.com\", \"sender_name\": \"팀장\", \"date\": \"2025-12-31 11:00:00 (UTC+09:00)\", \"sent_at\": \"2025-12-31T11:00:00+09:00\", \"subject\": \"\", \"body\": \"From: \\\"팀장\\\" <boss@example.com>To: <me@example.com>;Sent: 2025-12-31 11:00:00 (UTC+09:00)Subject: 이전 요청\\n상대방이 작성한 중요한 답변입니다.\"}]}"
+    },
+    {
+      "id": 2,
+      "owner": "me@example.com",
+      "fingerprint": "13d15b9c49d31dcfaf350479ceb4fe4f680ad649c3a42485dbf3ff1d4975af36",
+      "subject": "다른 대화",
+      "sent_at": "2026-01-01T10:00:00+09:00",
+      "sender": "me@example.com",
+      "to_json": "[\"peer@example.com\"]",
+      "cc_json": "[]",
+      "original_body": "안녕하세요. 검토 부탁드립니다.\n감사합니다.",
+      "original_authored_body": "안녕하세요. 검토 부탁드립니다.\n감사합니다.",
+      "source_name": "다른 대화.eml",
+      "revision": 0,
+      "updated_at": null,
+      "context_json": "{\"recipient_names\": {\"peer@example.com\": \"Peer\"}, \"in_reply_to\": \"\", \"references\": [], \"quotes\": []}"
+    }
+  ],
+  "contact_labels": [
+    {
+      "owner": "me@example.com",
+      "recipient": "boss@example.com",
+      "label": "교수",
+      "revision": 1
+    }
+  ],
+  "deleted_messages": [
+    {
+      "owner": "me@example.com",
+      "message_key": "quote:5095251b6cbd0926096626b2ae266581c8b8a06920be8d4ad2393fc406da1c9b"
+    },
+    {
+      "owner": "me@example.com",
+      "message_key": "sent:e5cfe2b5e2abfa5fd6410853c5b269da85bd3fdf8bb0cb82073dc40453a4d3dc"
+    }
+  ],
+  "manual_conversations": []
+}
