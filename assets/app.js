@@ -88,7 +88,7 @@ async function loadConversations({refreshChat=false}={}){
     if(state.current){
       applyLabelColor(document.querySelector('.chat'),state.current.label_color);
       $('role-tag').textContent=state.current.label||'직급 지정';
-      if(refreshChat||state.loadedQuery!==state.query||!state.reference)await openConversation(state.current,state.loadedQuery===state.query);
+      if(refreshChat||state.loadedQuery!==state.query||!state.reference)await openConversation(state.current,state.loadedQuery===state.query,false);
     }
   }catch(e){if(e.name!=='AbortError'&&request===state.listRequest){clearConversation();$('list-status').textContent='목록 로드 실패 · 페이지를 새로고침하세요.';error(e.message);}}
   finally{if(request===state.listRequest){state.listPending=false;$('conversations').inert=false;$('copy-prompt').disabled=$('prompt-request').disabled=!state.reference;}}
@@ -111,9 +111,9 @@ function renderContacts(){
   });
   if(!state.data.items.length)list.append(el('div','empty-list',state.query||state.label||state.unlabeled?'검색 결과 없음':'메일 없음'));
 }
-async function openConversation(contact,keepScroll=false){
-  document.querySelector('.app').classList.add('show-chat');
-  if(sameContact(contact,state.current)&&state.reference&&!keepScroll&&state.loadedQuery===state.query){if(state.matches.length)moveSearchMatch(0);return;}
+async function openConversation(contact,keepScroll=false,showChat=true){
+  if(showChat)document.querySelector('.app').classList.add('show-chat');
+  if(sameContact(contact,state.current)&&state.reference&&!keepScroll&&state.loadedQuery===state.query){if(state.matches.length)moveSearchMatch(0);$('timeline').focus({preventScroll:true});return;}
   const request=++state.chatRequest,query=state.query;const oldScroll=$('timeline').scrollTop;
   chatController?.abort();chatController=new AbortController();editorController?.abort();
   state.messages=[];state.timeline=[];
@@ -132,6 +132,7 @@ async function openConversation(contact,keepScroll=false){
     $('copy-prompt').disabled=$('prompt-request').disabled=state.listPending;
     $('timeline').scrollTop=keepScroll?oldScroll:$('timeline').scrollHeight;
     showSearchMatches(data.search_matches);
+    if(showChat&&!keepScroll&&document.activeElement===document.body)$('timeline').focus({preventScroll:true});
   }catch(e){if(e.name!=='AbortError'&&request===state.chatRequest){error(e.message);$('timeline').replaceChildren(el('div','empty-list','메일 로드 실패 · 페이지를 새로고침하세요.'));}}
 }
 function renderTimeline(matches=[]){
@@ -308,7 +309,7 @@ function showEditorError(message){$('editor-error').textContent=message;$('edito
 let searchTimer;
 $('search').addEventListener('input',()=>{state.query=$('search').value;$('copy-prompt').disabled=$('prompt-request').disabled=true;clearSearchMatch();clearTimeout(searchTimer);++state.listRequest;listController?.abort();searchTimer=setTimeout(()=>loadConversations(),180);});
 $('prompt-request').addEventListener('input',()=>{if(!state.current)return;const key=contactKey(state.current),value=$('prompt-request').value;if(value)requests.set(key,value);else requests.delete(key);});
-$('back').addEventListener('click',()=>document.querySelector('.app').classList.remove('show-chat'));
+$('back').addEventListener('click',()=>{document.querySelector('.app').classList.remove('show-chat');document.querySelector('.conversation-row.selected')?.focus({preventScroll:true});});
 $('filter-label').addEventListener('change',()=>{const value=$('filter-label').value;state.unlabeled=value==='unlabeled';state.label=value.startsWith('label:')?value.slice(6):'';loadConversations();});
 $('role-tag').addEventListener('click',openLabel);
 $('new-chat').addEventListener('click',openNewChat);
@@ -335,7 +336,7 @@ $('editor').addEventListener('cancel',event=>{event.preventDefault();closeEditor
 $('restore-body').addEventListener('click',()=>{if(!state.editing)return;$('edit-body').value=state.editing.display_original_authored;markDirty();});
 $('copy-body').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('panel-original').hidden?$('edit-body').value:state.editing.display_original);toast('본문 복사됨');}catch{showEditorError('복사 실패 · 본문을 선택해 직접 복사하세요.');}});
 for(const tab of ['edit','original']){$(`tab-${tab}`).addEventListener('click',()=>setTab(tab));$(`tab-${tab}`).addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?'edit':event.key==='End'?'original':tab==='edit'?'original':'edit';setTab(next);$(`tab-${next}`).focus();}});}
-document.addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'&&!$('editor').open&&!$('label-editor').open&&!$('delete-dialog').open&&!$('new-chat-dialog').open){event.preventDefault();$('search').focus();}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='s'&&$('editor').open){event.preventDefault();save();}});
+document.addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'&&!$('editor').open&&!$('label-editor').open&&!$('delete-dialog').open&&!$('new-chat-dialog').open){event.preventDefault();if(window.matchMedia('(max-width:700px)').matches)document.querySelector('.app').classList.remove('show-chat');$('search').focus();}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='s'&&$('editor').open){event.preventDefault();save();}});
 window.addEventListener('beforeunload',event=>{if(state.dirty||[...requests.values()].some(value=>value.trim())){event.preventDefault();event.returnValue='';}});
 $('conversations').replaceChildren(...Array.from({length:5},()=>el('div','loading-line')));
 const messageResizeObserver=new ResizeObserver(updateMessageToggles);
