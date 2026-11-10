@@ -190,7 +190,10 @@ fn existing_recipient_candidates_stay_with_that_recipient() {
     let found = pipeline::style_candidates(&db, "me@example.com", "boss@example.com", "교수", true)
         .unwrap();
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0]["recipient"], "boss@example.com");
+    assert_eq!(
+        found[0]["recipient"],
+        mimicmail::privacy::person_id("boss@example.com")
+    );
     assert!(
         pipeline::style_candidates(&db, "another@example.com", "boss@example.com", "교수", true)
             .unwrap()

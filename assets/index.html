@@ -31,7 +31,7 @@
       <header class="chat-header">
         <button id="back" class="icon-button mobile-back" aria-label="대화 목록으로"><svg><use href="#back-icon"/></svg></button>
         <div id="contact-avatar" class="avatar header-avatar">m</div>
-        <div class="contact-heading"><h2 id="contact-name">대화</h2><p id="contact-email" class="contact-email" hidden></p></div>
+        <div class="contact-heading"><h2 id="contact-name">대화</h2></div>
         <button id="role-tag" class="role-tag" disabled>직급 지정</button>
       </header>
       <div id="search-navigation" class="search-navigation" hidden><span id="search-position" role="status" aria-live="polite"></span><button id="previous-match" class="text-button" aria-label="이전 검색 결과">이전</button><button id="next-match" class="text-button" aria-label="다음 검색 결과">다음</button></div>
@@ -43,10 +43,7 @@
   <dialog id="new-chat-dialog" class="label-dialog" aria-labelledby="new-chat-heading">
     <div class="editor-heading"><h2 id="new-chat-heading">새 대화</h2></div>
     <form id="new-chat-form" class="new-chat-form">
-      <label id="new-owner-field" class="field">내 이메일<input id="new-owner" type="email" list="known-owners" required autocomplete="email"></label>
-      <datalist id="known-owners"></datalist>
-      <label class="field">수신자 이메일<input id="new-recipient" type="email" required autocomplete="off" placeholder="name@example.com"></label>
-      <label class="field">이름 (선택)<input id="new-name" maxlength="100" autocomplete="off"></label>
+      <label class="field">이름<input id="new-name" maxlength="100" required autocomplete="off"></label>
       <label class="field">직급 (선택)<input id="new-role" list="new-known-labels" maxlength="100" placeholder="예: 교수, 팀장" autocomplete="off"></label>
       <datalist id="new-known-labels"></datalist>
       <p id="new-chat-error" class="editor-error" role="alert" hidden></p>

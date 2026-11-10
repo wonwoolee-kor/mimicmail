@@ -61,7 +61,7 @@ function showSearchMatches(matches){
 function clearConversation(){
   ++state.chatRequest;chatController?.abort();editorController?.abort();
   state.current=null;state.reference=null;state.messages=[];state.timeline=[];clearSearchMatch();
-  $('contact-name').textContent='대화';$('contact-email').textContent='';$('contact-email').hidden=true;
+  $('contact-name').textContent='대화';
   $('contact-avatar').textContent='m';$('role-tag').textContent='직급 지정';$('role-tag').disabled=true;
   $('timeline').replaceChildren();$('prompt-request').value='';
   $('prompt-request').disabled=true;$('copy-prompt').disabled=true;applyLabelColor(document.querySelector('.chat'),'');
@@ -121,7 +121,6 @@ async function openConversation(contact,keepScroll=false,showChat=true){
   state.messages=[];state.timeline=[];
   state.current=contact;renderContacts();clearSearchMatch();applyLabelColor(document.querySelector('.chat'),contact.label_color);
   $('contact-name').textContent=contact.name;
-  $('contact-email').textContent=contact.recipient;$('contact-email').hidden=false;
   $('contact-avatar').textContent=initials(contact.name);
   $('role-tag').textContent=contact.label||'직급 지정';$('role-tag').disabled=false;
   state.reference=null;$('copy-prompt').disabled=true;$('prompt-request').disabled=true;
@@ -185,6 +184,7 @@ function buildPrompt(){
 
 프로젝트: [Mimicmail](<${project_path}>)
 데이터베이스: [SQLite DB](<${database_path}>)
+대화: ${state.current.name}
 대화 식별자: owner=${state.current.owner}, recipient=${state.current.recipient}
 
 작성 요청: ${request}
@@ -197,12 +197,8 @@ ${context_command}
 }
 function openNewChat(){
   $('new-chat-form').reset();$('new-chat-error').hidden=true;
-  const owners=state.data.owners;
-  $('new-owner').value=state.current?.owner||owners[0]||'';
-  $('new-owner-field').hidden=owners.length===1;
-  $('known-owners').replaceChildren(...owners.map(owner=>new Option(owner,owner)));
   $('new-known-labels').replaceChildren(...state.data.labels.map(label=>new Option(label,label)));
-  $('new-chat-dialog').showModal();$(owners.length?'new-recipient':'new-owner').focus();
+  $('new-chat-dialog').showModal();$('new-name').focus();
 }
 async function createChat(){
   if(state.creating)return;
@@ -210,7 +206,7 @@ async function createChat(){
   for(const input of $('new-chat-dialog').querySelectorAll('input,button'))input.disabled=true;
   $('new-chat-error').hidden=true;
   try{
-    const result=await api('/api/conversation',{method:'POST',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:$('new-owner').value,recipient:$('new-recipient').value,name:$('new-name').value,label:$('new-role').value})});
+    const result=await api('/api/conversation',{method:'POST',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:state.current?.owner||state.data.owners[0]||'local',name:$('new-name').value,label:$('new-role').value})});
     $('new-chat-dialog').close();
     clearTimeout(searchTimer);state.query='';state.label='';state.unlabeled=false;$('search').value='';
     await loadConversations();await openConversation(result.contact);$('prompt-request').focus();
@@ -221,7 +217,7 @@ async function createChat(){
 function openDelete(item){
   state.deleting={item,contact:state.current,revision:state.messages.find(mail=>mail.id===item.source_ids[0])?.revision};
   $('delete-subject').textContent=item.subject||'(제목 없음)';
-  $('delete-sender').textContent=item.sender_name&&item.sender&&item.sender_name!==item.sender?`${item.sender_name} <${item.sender}>`:item.sender||item.sender_name||'작성자 미확인';
+  $('delete-sender').textContent=item.sender_name||'작성자 미확인';
   $('delete-date').textContent=`${fullDate(item.sent_at)} ${clockTime(item.sent_at)}`.trim();
   $('delete-preview').textContent=item.body.length>160?item.body.slice(0,160)+'…':item.body;
   $('delete-error').hidden=true;$('delete-dialog').showModal();$('cancel-delete').focus();
@@ -247,7 +243,7 @@ function openLabel(){
   syncLabelColor();$('label-editor').showModal();$('role-label').focus();
 }
 function syncLabelColor(){
-  const saved=state.data.label_colors[labelChoiceValue('role-label')];
+  const saved=state.data.label_colors[$('role-label').value.trim()];
   const hue=labelHue(saved?.color);
   $('label-color-value').value=hue===null?'':labelHex(hue);$('label-hue').value=hue??25;
   previewLabelColor();
@@ -257,7 +253,7 @@ function previewLabelColor(){
   const name=hue===null?'색상 없음':hue<45?'빨강':hue<85?'주황':hue<125?'노랑':hue<175?'초록':hue<225?'청록':hue<275?'파랑':'보라';
   $('label-preview-avatar').textContent=initials(state.current.name);
   $('label-preview-name').textContent=state.current.name;
-  $('label-preview-role').textContent=labelChoiceValue('role-label')||'미지정';
+  $('label-preview-role').textContent=$('role-label').value.trim()||'미지정';
   $('label-hue-name').textContent=name;$('label-hue').setAttribute('aria-valuetext',name);
   $('label-hue').style.setProperty('--label-color',hue===null?'#777':labelCss(hue));
   applyLabelColor($('label-color-preview'),color);
@@ -296,7 +292,7 @@ async function openEditor(mail,tab){
   $('original-body').textContent=mail.display_original;
   $('source-name').textContent=`원본 파일 · ${mail.source_name}`;
   const forms=$('recipient-fields');forms.replaceChildren();
-  mail.recipients.forEach(profile=>{const form=el('section','recipient-form');form.dataset.recipient=profile.recipient;form.append(el('h4','',mail.context.recipient_names?.[profile.recipient]||profile.recipient.split('@')[0]));const fields=el('div','field-grid');fields.append(profileField('메일 목적','purpose',profile.purpose,state.data.purposes),profileField('나와의 관계','relationship',profile.relationship,state.data.relationships));form.append(fields);forms.append(form);});
+  mail.recipients.forEach(profile=>{const form=el('section','recipient-form');form.dataset.recipient=profile.recipient;form.append(el('h4','',mail.context.recipient_names?.[profile.recipient]||'수신자'));const fields=el('div','field-grid');fields.append(profileField('메일 목적','purpose',profile.purpose,state.data.purposes),profileField('나와의 관계','relationship',profile.relationship,state.data.relationships));form.append(fields);forms.append(form);});
   setTab(tab);$('editor').showModal();if(tab==='edit')$('edit-body').focus();
 }
 function markDirty(){state.dirty=true;$('save').disabled=state.saving;$('edit-status').textContent='저장 안 됨';}
@@ -309,7 +305,7 @@ async function save(){
   setSaving(true);$('editor-error').hidden=true;
   try{
     const updated=await api(`/api/mail/${state.editing.id}`,{method:'PUT',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({revision:state.editing.revision,authored_body:body,recipients})});
-    state.editing=updated;state.dirty=false;$('edit-status').textContent='저장됨';
+    state.editing=updated;state.dirty=false;$('edit-body').value=updated.display_body;$('edit-status').textContent='저장됨';
     await loadConversations({refreshChat:true});
   }catch(e){showEditorError(e.message);}finally{setSaving(false);}
 }

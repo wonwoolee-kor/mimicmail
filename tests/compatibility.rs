@@ -15,6 +15,36 @@ fn mime_and_quotes_match_python_fixtures() {
         assert_eq!(actual, case["expected"], "case {}", case["name"]);
     }
 }
+fn anonymized(value: &Value, field: &str) -> Value {
+    use mimicmail::privacy::{person_id, redact};
+    match value {
+        Value::String(s)
+            if matches!(
+                field,
+                "owner" | "recipient" | "sender" | "user" | "to" | "cc" | "owners"
+            ) =>
+        {
+            json!(person_id(s))
+        }
+        Value::String(s) => json!(redact(s)),
+        Value::Array(items) => items.iter().map(|v| anonymized(v, field)).collect(),
+        Value::Object(map) => map
+            .iter()
+            .map(|(k, v)| {
+                (
+                    if field == "recipient_names" {
+                        person_id(k)
+                    } else {
+                        k.clone()
+                    },
+                    anonymized(v, k),
+                )
+            })
+            .collect(),
+        _ => value.clone(),
+    }
+}
+
 #[test]
 fn existing_database_search_edit_labels_and_deletion_match_python() {
     let fixture = legacy();
@@ -23,7 +53,12 @@ fn existing_database_search_edit_labels_and_deletion_match_python() {
     for state in fixture["states"].as_array().unwrap() {
         match state["action"].as_str() {
             Some("edit") => {
-                gui::update_mail(&db, state["id"].as_i64().unwrap(), &state["payload"]).unwrap();
+                gui::update_mail(
+                    &db,
+                    state["id"].as_i64().unwrap(),
+                    &anonymized(&state["payload"], ""),
+                )
+                .unwrap();
             }
             Some("label") => {
                 gui::update_contact_label(&db, &state["payload"]).unwrap();
@@ -69,7 +104,14 @@ fn existing_database_search_edit_labels_and_deletion_match_python() {
                 {
                     fact.as_object_mut().unwrap().remove("key");
                 }
-                assert_eq!(selected["current_facts"], expected["current_facts"]);
+                selected["current_facts"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("recipient_name");
+                assert_eq!(
+                    selected["current_facts"],
+                    anonymized(&expected["current_facts"], "")
+                );
                 continue;
             }
             actual.as_object_mut().unwrap().remove("label_colors");
@@ -78,7 +120,16 @@ fn existing_database_search_edit_labels_and_deletion_match_python() {
                     item.as_object_mut().unwrap().remove("label_color");
                 }
             }
-            let mut expected = expected.clone();
+            let mut expected = anonymized(expected, "");
+            if let Some(messages) = actual.get_mut("messages").and_then(Value::as_array_mut) {
+                for mail in messages {
+                    if let Some(quotes) = mail["context"]["quotes"].as_array_mut() {
+                        for quote in quotes {
+                            quote.as_object_mut().unwrap().remove("key");
+                        }
+                    }
+                }
+            }
             clean(&mut actual);
             clean(&mut expected);
             assert_eq!(actual, expected, "state {} {key}", state["action"]);
@@ -207,7 +258,7 @@ fn korea_date_boundary_and_unknown_timezone() {
 #[test]
 fn manual_conversation_persists_and_reuses_contacts() {
     let db = populated();
-    let payload = json!({"owner":"ME@example.com","recipient":"New@example.com","name":"새 수신자","label":"교수"});
+    let payload = json!({"owner":"ME@example.com","name":"새 수신자","label":"교수"});
     let first = gui::create_conversation(&db, &payload).unwrap();
     assert_eq!(first["created"], true);
     assert_eq!(first["contact"]["count"], 0);
@@ -224,7 +275,7 @@ fn manual_conversation_persists_and_reuses_contacts() {
     );
     assert_eq!(
         gui::conversations(&db, "", false, "교수").unwrap()["items"][0]["recipient"],
-        "new@example.com"
+        first["contact"]["recipient"]
     );
 }
 #[test]
@@ -259,35 +310,32 @@ fn invalid_mutations_leave_database_unchanged_and_conflicts_fail() {
 fn new_recipient_style_does_not_copy_other_conversation_facts() {
     let db = populated();
     gui::update_contact_label(&db,&json!({"owner":"me@example.com","recipient":"boss@example.com","label":"교수","revision":0})).unwrap();
-    gui::create_conversation(
+    let created = gui::create_conversation(
         &db,
-        &json!({"owner":"me@example.com","recipient":"new@example.com","label":"교수"}),
+        &json!({"owner":"me@example.com","name":"새 수신자","label":"교수"}),
     )
     .unwrap();
-    let data = gui::draft_context(&db, "me@example.com", "new@example.com", "other").unwrap();
+    let recipient = created["contact"]["recipient"].as_str().unwrap();
+    let data = gui::draft_context(&db, "me@example.com", recipient, "other").unwrap();
     assert_eq!(data["current_facts"]["conversation"], json!([]));
-    assert_eq!(data["style_candidates"][0]["recipient"], "boss@example.com");
+    assert_eq!(
+        data["style_candidates"][0]["recipient"],
+        mimicmail::privacy::person_id("boss@example.com")
+    );
     assert_eq!(data["style_references"], json!([]));
     let id = data["style_candidates"][0]["fingerprint"]
         .as_str()
         .unwrap()
         .to_owned();
-    let selected = gui::selected_context(
-        &db,
-        "me@example.com",
-        "new@example.com",
-        "other",
-        &[],
-        &[id],
-    )
-    .unwrap();
+    let selected =
+        gui::selected_context(&db, "me@example.com", recipient, "other", &[], &[id]).unwrap();
     assert_eq!(
         selected["style_references"][0]["recipient"],
-        "boss@example.com"
+        mimicmail::privacy::person_id("boss@example.com")
     );
     assert_eq!(selected["current_facts"]["conversation"], json!([]));
     assert_eq!(
-        gui::draft_context(&db, "other@example.com", "new@example.com", "other").unwrap()["style_references"],
+        gui::draft_context(&db, "other@example.com", recipient, "other").unwrap()["style_references"],
         json!([])
     );
 }

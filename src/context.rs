@@ -245,7 +245,11 @@ pub fn timeline(messages: &[Value], owner: &str, deleted: &HashSet<String>) -> V
                 .and_then(Value::as_str)
                 .map(str::to_owned)
                 .unwrap_or_else(|| mail["id"].to_string());
-            let key = quote_key(sender, &stamp, &body, &fingerprint, index);
+            let key = if text(quote, "key").is_empty() {
+                quote_key(sender, &stamp, &body, &fingerprint, index)
+            } else {
+                text(quote, "key").to_owned()
+            };
             let identity = (
                 sender.to_owned(),
                 body.chars()

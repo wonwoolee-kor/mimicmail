@@ -15,6 +15,9 @@ pub fn open(path: &Path, readonly: bool) -> Result<Connection> {
     let db = Connection::open_with_flags(path, flags | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
     db.busy_timeout(Duration::from_secs(2))?;
     db.set_prepared_statement_cache_capacity(16);
+    if !readonly {
+        db.pragma_update(None, "secure_delete", true)?;
+    }
     Ok(db)
 }
 pub fn connect(path: &Path) -> Result<Connection> {
@@ -33,7 +36,7 @@ pub fn initialize(db: &Connection) -> Result<()> {
             [],
         )?;
     }
-    Ok(())
+    crate::privacy::migrate(db)
 }
 pub fn row_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let mut result = Map::new();

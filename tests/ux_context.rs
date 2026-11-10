@@ -56,9 +56,15 @@ fn unlabeled_filter_does_not_collide_with_user_label_names() {
     gui::update_contact_label(&db,&json!({"owner":"me@example.com","recipient":"boss@example.com","label":"미지정","revision":0})).unwrap();
     let unlabeled = gui::conversations_filtered(&db, "", false, "", true).unwrap();
     assert_eq!(array(&unlabeled, "items").len(), 1);
-    assert_eq!(unlabeled["items"][0]["recipient"], "peer@example.com");
+    assert_eq!(
+        unlabeled["items"][0]["recipient"],
+        mimicmail::privacy::person_id("peer@example.com")
+    );
     let named = gui::conversations_filtered(&db, "", false, "미지정", false).unwrap();
-    assert_eq!(named["items"][0]["recipient"], "boss@example.com");
+    assert_eq!(
+        named["items"][0]["recipient"],
+        mimicmail::privacy::person_id("boss@example.com")
+    );
     assert!(
         array(
             &gui::conversations_filtered(&db, "없는검색어", false, "", true).unwrap(),
@@ -175,19 +181,22 @@ fn new_person_candidates_cover_all_label_members_without_other_labels_or_owners(
         [],
     )
     .unwrap();
-    gui::create_conversation(
+    db.pragma_update(None, "user_version", 0).unwrap();
+    db::initialize(&db).unwrap();
+    let created = gui::create_conversation(
         &db,
-        &json!({"owner":"me@example.com","recipient":"new@example.com","label":"교수"}),
+        &json!({"owner":"me@example.com","name":"새 수신자","label":"교수"}),
     )
     .unwrap();
-    let catalog = gui::draft_context(&db, "me@example.com", "new@example.com", "thanks").unwrap();
+    let recipient = created["contact"]["recipient"].as_str().unwrap();
+    let catalog = gui::draft_context(&db, "me@example.com", recipient, "thanks").unwrap();
     assert_eq!(array(&catalog, "style_candidates").len(), 6);
     assert!(array(&catalog, "history_candidates").is_empty());
     assert_eq!(catalog["style_references"], json!([]));
     let selected = gui::selected_context(
         &db,
         "me@example.com",
-        "new@example.com",
+        recipient,
         "thanks",
         &[],
         &["fp5".into()],
@@ -201,7 +210,7 @@ fn new_person_candidates_cover_all_label_members_without_other_labels_or_owners(
             gui::selected_context(
                 &db,
                 "me@example.com",
-                "new@example.com",
+                recipient,
                 "thanks",
                 &[],
                 &[id.into()]

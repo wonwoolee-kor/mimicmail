@@ -4,6 +4,7 @@ pub mod gui;
 pub mod llm;
 pub mod mail;
 pub mod pipeline;
+pub mod privacy;
 pub mod server;
 
 use serde_json::Value;

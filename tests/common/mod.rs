@@ -34,7 +34,7 @@ pub fn memory() -> Connection {
     db::initialize(&db).unwrap();
     db
 }
-pub fn load_tables(db: &Connection, tables: &Value) {
+pub fn load_legacy_tables(db: &Connection, tables: &Value) {
     for (table, rows) in tables.as_object().unwrap() {
         for row in rows.as_array().unwrap() {
             let columns = row.as_object().unwrap();
@@ -57,6 +57,11 @@ pub fn load_tables(db: &Connection, tables: &Value) {
                 .unwrap();
         }
     }
+}
+pub fn load_tables(db: &Connection, tables: &Value) {
+    load_legacy_tables(db, tables);
+    db.pragma_update(None, "user_version", 0).unwrap();
+    db::initialize(db).unwrap();
 }
 pub fn legacy() -> Value {
     serde_json::from_str(include_str!("../fixtures/legacy.json")).unwrap()

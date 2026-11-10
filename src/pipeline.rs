@@ -3,7 +3,7 @@ use crate::{
     db,
     llm::{LanguageModel, object_schema},
     mail::{Mail, parse_mail, read_source},
-    select, text,
+    privacy, select, text,
 };
 use anyhow::{Result, bail};
 use chrono::NaiveDate;
@@ -82,6 +82,7 @@ pub fn ingest(
     let owner = owner.trim().to_lowercase();
     let mut own: HashSet<_> = aliases.iter().map(|s| s.trim().to_lowercase()).collect();
     own.insert(owner.clone());
+    let owner_id = privacy::person_id(&owner);
     let mut counts = json!({"indexed":0,"skipped":0});
     if since.is_some() {
         counts["excluded_before_date"] = json!(0);
@@ -121,7 +122,7 @@ pub fn ingest(
             if !db::exists(
                 db,
                 "SELECT 1 FROM sent_mail WHERE owner=? AND fingerprint=? AND recipient=?",
-                params![owner, mail.fingerprint, recipient],
+                params![owner_id, mail.fingerprint, privacy::person_id(recipient)],
             )? {
                 pending.push(recipient);
             }
@@ -129,7 +130,11 @@ pub fn ingest(
         if pending.is_empty() {
             db.execute(
                 "UPDATE mail_archive SET context_json=? WHERE owner=? AND fingerprint=?",
-                params![mail.context.to_string(), owner, mail.fingerprint],
+                params![
+                    privacy::stored_mail(&mail).context.to_string(),
+                    owner_id,
+                    mail.fingerprint
+                ],
             )?;
             increment(&mut counts, "skipped");
             continue;
@@ -140,7 +145,7 @@ pub fn ingest(
             if let Some(label) = db::one(
                 db,
                 "SELECT label FROM contact_labels WHERE owner=? AND recipient=?",
-                params![owner, recipient],
+                params![owner_id, privacy::person_id(recipient)],
             )? {
                 profile["role"] = json!(if text(&label, "label").is_empty() {
                     "unknown"
@@ -150,24 +155,25 @@ pub fn ingest(
             }
             profiles.push(profile);
         }
+        let stored = privacy::stored_mail(&mail);
         let tx = db.transaction()?;
         for (recipient, profile) in pending.iter().zip(&profiles) {
             tx.execute(
                 "INSERT INTO sent_mail VALUES (?,?,?,?,?,?,?,?,?)",
                 params![
-                    owner,
-                    mail.fingerprint,
-                    mail.message_id,
-                    mail.sender,
-                    recipient,
-                    text(profile, "role"),
+                    owner_id,
+                    stored.fingerprint,
+                    stored.message_id,
+                    stored.sender,
+                    privacy::person_id(recipient),
+                    privacy::redact(text(profile, "role")),
                     text(profile, "relationship"),
                     text(profile, "purpose"),
-                    mail.authored_body
+                    stored.authored_body
                 ],
             )?;
         }
-        tx.execute("INSERT OR IGNORE INTO mail_archive (owner,fingerprint,subject,sent_at,sender,to_json,cc_json,original_body,original_authored_body,source_name,context_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)",params![owner,mail.fingerprint,mail.subject,sent_at.map(|s| s.to_rfc3339()).unwrap_or_default(),mail.sender,serde_json::to_string(&mail.to)?,serde_json::to_string(&mail.cc)?,mail.body,mail.authored_body,path.file_name().unwrap_or_default().to_string_lossy(),mail.context.to_string()])?;
+        tx.execute("INSERT OR IGNORE INTO mail_archive (owner,fingerprint,subject,sent_at,sender,to_json,cc_json,original_body,original_authored_body,source_name,context_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)",params![owner_id,stored.fingerprint,stored.subject,sent_at.map(|s| s.to_rfc3339()).unwrap_or_default(),stored.sender,serde_json::to_string(&stored.to)?,serde_json::to_string(&stored.cc)?,stored.body,stored.authored_body,privacy::redact(&path.file_name().unwrap_or_default().to_string_lossy()),stored.context.to_string()])?;
         tx.commit()?;
         increment(&mut counts, "indexed");
     }
@@ -183,6 +189,8 @@ pub fn style_candidates(
     role: &str,
     existing: bool,
 ) -> Result<Vec<Value>> {
+    let owner = privacy::person_id(owner);
+    let recipient = privacy::person_id(recipient);
     // All people in the exact label are candidates; relationship/purpose cannot admit outsiders.
     let styles = db::rows(db,
         "SELECT s.*,a.subject,a.sent_at FROM sent_mail s
@@ -228,6 +236,8 @@ pub fn draft(
     let owner = owner.trim().to_lowercase();
     let recipient = recipient.trim().to_lowercase();
     let mut profile = classify(llm, &mail, &owner, &recipient, request)?;
+    let owner = privacy::person_id(&owner);
+    let recipient = privacy::person_id(&recipient);
     let label = db::one(
         db,
         "SELECT label FROM contact_labels WHERE owner=? AND recipient=?",

@@ -157,7 +157,7 @@ fn http_create_delete_validation_and_readonly_context() {
     let created = client
         .post(format!("{}/api/conversation", server.url))
         .header("X-Mimicmail-Token", &token)
-        .json(&json!({"owner":"me@example.com","recipient":"new@example.com","label":"교수"}))
+        .json(&json!({"owner":"me@example.com","name":"새 수신자","label":"교수"}))
         .send()
         .unwrap();
     assert_eq!(created.status(), 200);
