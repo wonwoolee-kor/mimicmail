@@ -86,7 +86,6 @@ async function loadConversations({refreshChat=false}={}){
     if(selected)state.current=selected;else clearConversation();
     $('filter-label').replaceChildren(new Option('모든 직급',''),new Option('미지정','unlabeled'),...data.labels.map(label=>new Option(label,`label:${label}`)));
     $('filter-label').value=state.unlabeled?'unlabeled':state.label?`label:${state.label}`:'';
-    $('account-email').textContent=data.owners.join(', ');
     $('list-status').textContent=state.query?`검색 결과 ${data.items.length}개`:'';
     renderContacts();error('');
     if(state.current){
