@@ -266,7 +266,7 @@ function previewLabelColor(){
   $('label-preview-avatar').textContent=initials(state.current.name);
   $('label-preview-name').textContent=state.current.name;
   $('label-preview-role').textContent=labelChoiceValue('role-label')||'미지정';
-  $('label-hue-name').textContent=name;$('label-hue').setAttribute('aria-valuetext',name);
+  $('label-hue').setAttribute('aria-valuetext',name);
   $('label-hue').style.setProperty('--label-color',hue===null?'#777':labelCss(hue));
   applyLabelColor($('label-color-preview'),color);
 }
