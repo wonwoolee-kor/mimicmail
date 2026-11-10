@@ -26,7 +26,7 @@ test('every selectable hue survives saving and reopening without drift', () => {
     assert.match(hex,/^#[0-9a-f]{6}$/);
     assert.equal(labelHue(hex),hue,`${hue}: ${hex}`);
     assert.equal(labelHex(labelHue(hex)),hex);
-    assert.equal(labelCss(hue),`oklch(0.6 0.1 ${hue})`);
+    assert.match(labelCss(hue),new RegExp(`^oklch\\(0\\.6 [0-9.]+ ${hue}\\)$`));
   }
 });
 
@@ -41,7 +41,11 @@ test('the complete hue range preserves lightness, chroma, gamut, and large bold 
     const L = 0.2104542553*l+0.7936177850*m-0.0040720468*s;
     const C = Math.hypot(1.9779984951*l-2.4285922050*m+0.4505937099*s,0.0259040371*l+0.7827717662*m-0.8086757660*s);
     assert.ok(Math.abs(L-0.60)<0.002,`lightness at ${hue}`);
-    assert.ok(Math.abs(C-0.10)<0.002,`chroma at ${hue}`);
+    assert.ok(C>=0.10 && C<=0.122,`chroma at ${hue}`);
     assert.ok(1.05/(0.2126*r+0.7152*g+0.0722*b+0.05)>=3,`contrast at ${hue}`);
   }
+});
+
+test('red and violet gain chroma without changing lightness', () => {
+  for (const hue of [25,305]) assert.equal(labelCss(hue),`oklch(0.6 0.12 ${hue})`);
 });
