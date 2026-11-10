@@ -11,7 +11,6 @@
 <body>
   <svg class="icons" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
     <symbol id="search-icon" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></symbol>
-    <symbol id="refresh-icon" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M19 11a7 7 0 0 0-12-5L4 9m16 6-3 3A7 7 0 0 1 5 13"/></symbol>
     <symbol id="reply-icon" viewBox="0 0 24 24"><path d="m9 5-6 6 6 6M3 11h10a7 7 0 0 1 7 7"/></symbol>
     <symbol id="edit-icon" viewBox="0 0 24 24"><path d="m15 4 5 5M4 20l1-6L16 3a2 2 0 0 1 3 0l2 2a2 2 0 0 1 0 3L10 19l-6 1Z"/></symbol>
     <symbol id="document-icon" viewBox="0 0 24 24"><path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8M8 16h8"/></symbol>
@@ -22,11 +21,9 @@
   </svg>
   <main class="app">
     <aside class="sidebar" aria-label="대화 목록">
-      <header class="brand-row"><span class="brand-mark">m</span><h1 class="brand">메일함</h1><button id="new-chat" class="new-chat-button" disabled>+ 새 대화</button><button id="refresh" class="icon-button" aria-label="메일함 새로고침" title="새로고침"><svg><use href="#refresh-icon"/></svg></button></header>
-      <p id="library-summary" class="library-summary">불러오는 중…</p>
+      <header class="brand-row"><span class="brand-mark">m</span><h1 class="brand">메일함</h1><button id="new-chat" class="new-chat-button" disabled>+ 새 대화</button></header>
       <div class="search-wrap"><svg aria-hidden="true"><use href="#search-icon"/></svg><label for="search" class="sr-only">이름, 직급, 내용 검색</label><input id="search" type="search" placeholder="이름, 직급, 내용 검색" autocomplete="off"><kbd>⌘ K</kbd></div>
       <label class="sr-only" for="filter-label">직급 필터</label><select id="filter-label" class="label-filter"><option value="">모든 직급</option></select>
-      <div class="filters" aria-label="대화 필터"><button id="filter-all" class="filter active" aria-pressed="true">전체</button><button id="filter-replies" class="filter" aria-pressed="false">답장·인용 있음</button></div>
       <div id="list-status" class="list-status" role="status" aria-live="polite"></div>
       <div id="conversations" class="conversation-list" aria-label="수신자별 대화"></div>
     </aside>
@@ -35,7 +32,7 @@
         <button id="back" class="icon-button mobile-back" aria-label="대화 목록으로"><svg><use href="#back-icon"/></svg></button>
         <div id="contact-avatar" class="avatar header-avatar">m</div>
         <div class="contact-heading"><h2 id="contact-name">대화</h2><p id="contact-email" class="contact-email" hidden></p></div>
-        <button id="role-tag" class="role-tag" disabled>직급 지정</button><span id="reply-note" class="reply-note"></span>
+        <button id="role-tag" class="role-tag" disabled>직급 지정</button>
       </header>
       <div id="search-navigation" class="search-navigation" hidden><span id="search-position" role="status" aria-live="polite"></span><button id="previous-match" class="text-button" aria-label="이전 검색 결과">이전</button><button id="next-match" class="text-button" aria-label="다음 검색 결과">다음</button></div>
       <div id="chat-error" class="error-banner" role="alert" hidden></div>

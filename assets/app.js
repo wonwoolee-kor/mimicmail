@@ -1,12 +1,11 @@
 const $ = id => document.getElementById(id);
-const state = {data:null, current:null, messages:[], timeline:[], reference:null, creating:false, query:'', replies:false, label:'', unlabeled:false, matches:[], matchIndex:-1, loadedQuery:'', listPending:false, labelSaving:false, deleting:null, deleteSaving:false, listRequest:0, chatRequest:0, editing:null, dirty:false, saving:false};
+const state = {data:null, current:null, messages:[], timeline:[], reference:null, creating:false, query:'', label:'', unlabeled:false, matches:[], matchIndex:-1, loadedQuery:'', listPending:false, labelSaving:false, deleting:null, deleteSaving:false, listRequest:0, chatRequest:0, editing:null, dirty:false, saving:false};
 const requests = new Map();
 let listController, chatController, editorController;
 const icon = name => { const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); const use=document.createElementNS(svg.namespaceURI,'use'); use.setAttribute('href',`#${name}-icon`);svg.append(use);svg.setAttribute('aria-hidden','true');return svg; };
 function el(tag, cls, text){const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;}
 function button(label,cls,fn){const b=el('button',cls,label);b.type='button';b.addEventListener('click',fn);return b;}
 function initials(name){return name.replace(/[<>"\s]/g,'').slice(0,2);}
-function shortDate(date){return date ? new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric'}).format(new Date(date)) : '날짜 미상';}
 function fullDate(date){return date ? new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'long',day:'numeric',weekday:'short'}).format(new Date(date)) : '날짜 미상';}
 function clockTime(date){return date ? new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(date)) : '';}
 function avatar(name){return el('div','avatar',initials(name));}
@@ -62,7 +61,7 @@ function clearConversation(){
   state.current=null;state.reference=null;state.messages=[];state.timeline=[];clearSearchMatch();
   $('contact-name').textContent='대화';$('contact-email').textContent='';$('contact-email').hidden=true;
   $('contact-avatar').textContent='m';$('role-tag').textContent='직급 지정';$('role-tag').disabled=true;
-  $('reply-note').textContent='';$('timeline').replaceChildren();$('prompt-request').value='';
+  $('timeline').replaceChildren();$('prompt-request').value='';
   $('prompt-request').disabled=true;$('copy-prompt').disabled=true;applyLabelColor(document.querySelector('.chat'),'');
   document.querySelector('.app').classList.remove('show-chat');
 }
@@ -76,12 +75,10 @@ async function loadConversations({refreshChat=false}={}){
   listController?.abort();listController=new AbortController();
   state.listPending=true;$('conversations').inert=true;$('copy-prompt').disabled=true;$('prompt-request').disabled=true;
   $('list-status').textContent='불러오는 중…';
-  $('refresh').disabled=true;
   try{
-    const data=await api(`/api/conversations?${new URLSearchParams({q:state.query,replies:state.replies?'1':'0',label:state.label,unlabeled:state.unlabeled?'1':'0'})}`,{signal:listController.signal});
+    const data=await api(`/api/conversations?${new URLSearchParams({q:state.query,label:state.label,unlabeled:state.unlabeled?'1':'0'})}`,{signal:listController.signal});
     if(request!==state.listRequest)return;
     state.data=data;$('new-chat').disabled=false;
-    $('library-summary').textContent=`보낸 메일 ${data.total_mails}통 · ${data.total_conversations}개의 대화`;
     const selected=data.items.find(item=>sameContact(item,state.current));
     if(selected)state.current=selected;else clearConversation();
     $('filter-label').replaceChildren(new Option('모든 직급',''),new Option('미지정','unlabeled'),...data.labels.map(label=>new Option(label,`label:${label}`)));
@@ -93,27 +90,26 @@ async function loadConversations({refreshChat=false}={}){
       $('role-tag').textContent=state.current.label||'직급 지정';
       if(refreshChat||state.loadedQuery!==state.query||!state.reference)await openConversation(state.current,state.loadedQuery===state.query);
     }
-  }catch(e){if(e.name!=='AbortError'&&request===state.listRequest){clearConversation();$('list-status').textContent='목록 로드 실패 · 새로고침하세요.';error(e.message);}}
-  finally{if(request===state.listRequest){state.listPending=false;$('conversations').inert=false;$('refresh').disabled=false;$('copy-prompt').disabled=$('prompt-request').disabled=!state.reference;}}
+  }catch(e){if(e.name!=='AbortError'&&request===state.listRequest){clearConversation();$('list-status').textContent='목록 로드 실패 · 페이지를 새로고침하세요.';error(e.message);}}
+  finally{if(request===state.listRequest){state.listPending=false;$('conversations').inert=false;$('copy-prompt').disabled=$('prompt-request').disabled=!state.reference;}}
 }
 function renderContacts(){
   const list=$('conversations');list.replaceChildren();
   state.data.items.forEach(item=>{
     const row=button('',`conversation-row${sameContact(item,state.current)?' selected':''}`,()=>openConversation(item));
-    row.setAttribute('aria-label',`${item.name}, 보낸 메일 ${item.count}통${item.reply_count?', 답장·인용 있음':''}`);
+    row.setAttribute('aria-label',`${item.name}${item.label?`, ${item.label}`:''}`);
     row.setAttribute('aria-current',sameContact(item,state.current)?'true':'false');
     applyLabelColor(row,item.label_color);row.append(avatar(item.name));
-    const content=el('div'),top=el('div','row-top');top.append(el('span','row-name',item.name),el('time','row-time',shortDate(item.latest)));
+    const content=el('div'),top=el('div','row-top');top.append(el('span','row-name',item.name));
     top.firstChild.title=item.name;
     const preview=el('p','row-subject',item.search_match?.preview||item.preview||item.subject||(item.registered?'새 대화':'(본문 없음)'));
     if(item.search_match)highlight(preview,item.search_match.term);
-    content.append(top);if(item.label)content.append(el('span','rank-chip',item.label));content.append(preview);
-    const bottom=el('div','row-bottom');
-    if(item.reply_count){const badge=el('span','reply-badge');badge.append(icon('reply'),document.createTextNode('답장·인용'));bottom.append(badge);}
-
-    bottom.append(el('span','row-count',`${item.count}통`));content.append(bottom);row.append(content);list.append(row);
+    if(item.label){const label=el('span','rank-chip',item.label);label.title=item.label;top.append(label);}
+    content.append(top,preview);
+    if(item.reply_count){const bottom=el('div','row-bottom'),badge=el('span','reply-badge');badge.append(icon('reply'),document.createTextNode('답장·인용'));bottom.append(badge);content.append(bottom);}
+    row.append(content);list.append(row);
   });
-  if(!state.data.items.length)list.append(el('div','empty-list',state.query||state.label||state.unlabeled||state.replies?'검색 결과 없음':'메일 없음'));
+  if(!state.data.items.length)list.append(el('div','empty-list',state.query||state.label||state.unlabeled?'검색 결과 없음':'메일 없음'));
 }
 async function openConversation(contact,keepScroll=false){
   document.querySelector('.app').classList.add('show-chat');
@@ -126,7 +122,6 @@ async function openConversation(contact,keepScroll=false){
   $('contact-email').textContent=contact.recipient;$('contact-email').hidden=false;
   $('contact-avatar').textContent=initials(contact.name);
   $('role-tag').textContent=contact.label||'직급 지정';$('role-tag').disabled=false;
-  $('reply-note').textContent=contact.reply_count?'인용된 답장 포함':'';
   state.reference=null;$('copy-prompt').disabled=true;$('prompt-request').disabled=true;
   $('prompt-request').value=requests.get(contactKey(contact))||'';
   if(!keepScroll){$('timeline').replaceChildren(...Array.from({length:3},()=>el('div','loading-line')));}
@@ -137,7 +132,7 @@ async function openConversation(contact,keepScroll=false){
     $('copy-prompt').disabled=$('prompt-request').disabled=state.listPending;
     $('timeline').scrollTop=keepScroll?oldScroll:$('timeline').scrollHeight;
     showSearchMatches(data.search_matches);
-  }catch(e){if(e.name!=='AbortError'&&request===state.chatRequest){error(e.message);$('timeline').replaceChildren(el('div','empty-list','메일 로드 실패 · 새로고침하세요.'));}}
+  }catch(e){if(e.name!=='AbortError'&&request===state.chatRequest){error(e.message);$('timeline').replaceChildren(el('div','empty-list','메일 로드 실패 · 페이지를 새로고침하세요.'));}}
 }
 function renderTimeline(matches=[]){
   const timeline=$('timeline');timeline.replaceChildren();let previousDay='',previousTopic='';
@@ -214,9 +209,7 @@ async function createChat(){
   try{
     const result=await api('/api/conversation',{method:'POST',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:$('new-owner').value,recipient:$('new-recipient').value,name:$('new-name').value,label:$('new-role').value})});
     $('new-chat-dialog').close();
-    clearTimeout(searchTimer);state.query='';state.label='';state.unlabeled=false;state.replies=false;$('search').value='';
-    $('filter-all').classList.add('active');$('filter-all').setAttribute('aria-pressed','true');
-    $('filter-replies').classList.remove('active');$('filter-replies').setAttribute('aria-pressed','false');
+    clearTimeout(searchTimer);state.query='';state.label='';state.unlabeled=false;$('search').value='';
     await loadConversations();await openConversation(result.contact);$('prompt-request').focus();
     if(!result.created)toast('기존 대화 열림');
   }catch(e){$('new-chat-error').textContent=e.message;$('new-chat-error').hidden=false;}
@@ -315,8 +308,6 @@ function showEditorError(message){$('editor-error').textContent=message;$('edito
 let searchTimer;
 $('search').addEventListener('input',()=>{state.query=$('search').value;$('copy-prompt').disabled=$('prompt-request').disabled=true;clearSearchMatch();clearTimeout(searchTimer);++state.listRequest;listController?.abort();searchTimer=setTimeout(()=>loadConversations(),180);});
 $('prompt-request').addEventListener('input',()=>{if(!state.current)return;const key=contactKey(state.current),value=$('prompt-request').value;if(value)requests.set(key,value);else requests.delete(key);});
-for(const [id,replies] of [['filter-all',false],['filter-replies',true]]){$(id).addEventListener('click',()=>{state.replies=replies;for(const [other,value] of [['filter-all',false],['filter-replies',true]]){$(other).classList.toggle('active',replies===value);$(other).setAttribute('aria-pressed',String(replies===value));}loadConversations();});}
-$('refresh').addEventListener('click',()=>loadConversations({refreshChat:true}));
 $('back').addEventListener('click',()=>document.querySelector('.app').classList.remove('show-chat'));
 $('filter-label').addEventListener('change',()=>{const value=$('filter-label').value;state.unlabeled=value==='unlabeled';state.label=value.startsWith('label:')?value.slice(6):'';loadConversations();});
 $('role-tag').addEventListener('click',openLabel);
