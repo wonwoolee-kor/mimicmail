@@ -1,4 +1,5 @@
 import {labelHue,labelHex,labelCss} from './label-colors.mjs';
+import {api} from './api.mjs';
 
 const $ = id => document.getElementById(id);
 const state = {data:null, current:null, messages:[], timeline:[], reference:null, creating:false, query:'', label:'', unlabeled:false, matches:[], matchIndex:-1, loadedQuery:'', listPending:false, labelSaving:false, deleting:null, deleteSaving:false, listRequest:0, chatRequest:0, editing:null, dirty:false, saving:false};
@@ -83,7 +84,6 @@ function clearConversation(){
 function error(message){$('chat-error').textContent=message;$('chat-error').hidden=!message;}
 let toastTimer;
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
-async function api(path, options={}){const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||'요청을 완료하지 못했습니다.');return data;}
 
 async function loadConversations({refreshChat=false}={}){
   const request=++state.listRequest;
@@ -300,6 +300,7 @@ function previewLabelColor(){
 async function saveLabel(label=labelChoiceValue('role-label')){
   if(state.labelSaving)return;
   const contact=state.current;state.labelSaving=true;
+  $('label-error').hidden=true;
   for(const node of $('label-editor').querySelectorAll('input,select,button'))node.disabled=true;
   try{
     const result=await api('/api/contact-label',{method:'PUT',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:contact.owner,recipient:contact.recipient,label,revision:contact.label_revision,color:label?$('label-color-value').value.trim():'',color_revision:state.data.label_colors[label]?.revision||0})});

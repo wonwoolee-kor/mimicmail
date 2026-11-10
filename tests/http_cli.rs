@@ -84,7 +84,7 @@ fn http_static_assets_host_origin_token_and_edit_conflict() {
             .unwrap()
             .contains("frame-ancestors 'none'")
     );
-    for asset in ["/app.js", "/app.css", "/label-colors.mjs"] {
+    for asset in ["/app.js", "/app.css", "/label-colors.mjs", "/api.mjs"] {
         assert_eq!(
             client
                 .get(format!("{}{asset}", server.url))
@@ -460,4 +460,55 @@ fn cli_ingest_and_stdin_draft_use_rust_and_do_not_save_current_mail() {
         1
     );
     assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 3);
+}
+
+#[test]
+fn http_stale_session_rejects_without_writing_and_fresh_token_saves_color() {
+    let client = client();
+    let previous = Server::start();
+    let old_token = previous.token(&client);
+    drop(previous);
+    let server = Server::start();
+    let endpoint = format!("{}/api/contact-label", server.url);
+    let payload = json!({"owner":"me@example.com","recipient":"boss@example.com","label":"교수","revision":0,"color":"#b95f5b","color_revision":0});
+    let rejected = client
+        .put(&endpoint)
+        .header("X-Mimicmail-Token", &old_token)
+        .header("Origin", &server.url)
+        .json(&payload)
+        .send()
+        .unwrap();
+    assert_eq!(rejected.status(), 403);
+    assert_eq!(rejected.json::<Value>().unwrap()["code"], "session_expired");
+    let blocked_origin = client
+        .put(&endpoint)
+        .header("X-Mimicmail-Token", &old_token)
+        .header("Origin", "https://untrusted.example")
+        .json(&payload)
+        .send()
+        .unwrap();
+    assert_eq!(blocked_origin.status(), 403);
+    assert!(
+        blocked_origin
+            .json::<Value>()
+            .unwrap()
+            .get("code")
+            .is_none()
+    );
+    let saved = client
+        .put(&endpoint)
+        .header("X-Mimicmail-Token", server.token(&client))
+        .header("Origin", &server.url)
+        .json(&payload)
+        .send()
+        .unwrap();
+    assert_eq!(saved.status(), 200);
+    assert_eq!(saved.json::<Value>().unwrap()["revision"], 1);
+    let data = client
+        .get(format!("{}/api/conversations", server.url))
+        .send()
+        .unwrap()
+        .json::<Value>()
+        .unwrap();
+    assert_eq!(data["label_colors"]["교수"]["color"], "#b95f5b");
 }

@@ -67,6 +67,10 @@ async fn handle(
                 include_bytes!("../assets/app.js"),
                 "text/javascript; charset=utf-8",
             )),
+            "/api.mjs" => Some((
+                include_bytes!("../assets/api.mjs"),
+                "text/javascript; charset=utf-8",
+            )),
             "/label-colors.mjs" => Some((
                 include_bytes!("../assets/label-colors.mjs"),
                 "text/javascript; charset=utf-8",
@@ -98,14 +102,19 @@ async fn handle(
             .get("X-Mimicmail-Token")
             .and_then(|v| v.to_str().ok());
         let origin = request.headers().get("Origin");
-        if token != Some(state.token.as_str())
-            || origin.is_some_and(|o| {
-                !hosts
-                    .iter()
-                    .any(|h| o.to_str().ok() == Some(format!("http://{h}").as_str()))
-            })
-        {
-            return Ok(error(403, "보관함 화면에서 다시 시도하세요."));
+        if origin.is_some_and(|o| {
+            !hosts
+                .iter()
+                .any(|h| o.to_str().ok() == Some(format!("http://{h}").as_str()))
+        }) {
+            return Ok(error(403, "보관함 주소로 다시 접속한 뒤 저장하세요."));
+        }
+        if token != Some(state.token.as_str()) {
+            return Ok(response(
+                403,
+                json!({"code":"session_expired","error":"연결이 만료되었습니다. 페이지를 새로고침한 뒤 다시 저장하세요."}).to_string(),
+                "application/json; charset=utf-8",
+            ));
         }
         if request
             .headers()

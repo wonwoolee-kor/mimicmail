@@ -175,8 +175,8 @@ cargo test --locked
 cargo fmt --check
 cargo clippy --all-targets --locked -- -D warnings
 
-# 색상 변환·대비·저장 왕복 검사 (Node.js)
-node --test tests/label_colors.mjs
+# 색상 변환·대비·저장 왕복·인증 만료 복구 검사 (Node.js)
+node --test tests/*.mjs
 ```
 
 테스트용 메일과 임시 데이터베이스, 가짜 Codex 프로세스를 사용하며 외부 API를 호출하지 않습니다. `tests/fixtures/`에는 기존 Python 구현에서 생성한 합성 자료와 기대 결과를 보관해 SQLite·검색·삭제 키·MIME 파싱의 호환성을 검증합니다. 테스트 실행에도 Python은 필요하지 않습니다. MIME 파싱, 인용문 분리, 날짜·시간대 경계, 수신 메일 제외, 별칭, 중복 색인, 여러 수신자 처리, 사용자별 격리, 검색 우선순위, 사실/문체 입력 분리, 원문 보존, 중복 인용 제거, 직접 지정한 직급 적용, 편집·충돌 감지, 로컬 HTTP 접근 및 CLI 전체 흐름을 확인합니다.
