@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Mimicmail · 내 메일함</title>
+  <link rel="stylesheet" href="/app.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <svg class="icons" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="search-icon" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="refresh-icon" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M19 11a7 7 0 0 0-12-5L4 9m16 6-3 3A7 7 0 0 1 5 13"/></symbol>
+    <symbol id="reply-icon" viewBox="0 0 24 24"><path d="m9 5-6 6 6 6M3 11h10a7 7 0 0 1 7 7"/></symbol>
+    <symbol id="edit-icon" viewBox="0 0 24 24"><path d="m15 4 5 5M4 20l1-6L16 3a2 2 0 0 1 3 0l2 2a2 2 0 0 1 0 3L10 19l-6 1Z"/></symbol>
+    <symbol id="document-icon" viewBox="0 0 24 24"><path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8M8 16h8"/></symbol>
+    <symbol id="close-icon" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="back-icon" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7"/></symbol>
+    <symbol id="copy-icon" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+    <symbol id="delete-icon" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></symbol>
+  </svg>
+  <main class="app">
+    <aside class="sidebar" aria-label="대화 목록">
+      <header class="brand-row"><span class="brand-mark">m</span><h1 class="brand">메일함</h1><button id="new-chat" class="new-chat-button" disabled>+ 새 대화</button><button id="refresh" class="icon-button" aria-label="메일함 새로고침" title="새로고침"><svg><use href="#refresh-icon"/></svg></button></header>
+      <p id="library-summary" class="library-summary">불러오는 중…</p>
+      <div class="search-wrap"><svg aria-hidden="true"><use href="#search-icon"/></svg><label for="search" class="sr-only">이름, 직급, 내용 검색</label><input id="search" type="search" placeholder="이름, 직급, 내용 검색" autocomplete="off"><kbd>⌘ K</kbd></div>
+      <label class="sr-only" for="filter-label">직급 필터</label><select id="filter-label" class="label-filter"><option value="">모든 직급</option></select>
+      <div class="filters" aria-label="대화 필터"><button id="filter-all" class="filter active" aria-pressed="true">전체</button><button id="filter-replies" class="filter" aria-pressed="false">답장·인용 있음</button></div>
+      <div id="list-status" class="list-status" role="status" aria-live="polite"></div>
+      <div id="conversations" class="conversation-list" aria-label="수신자별 대화"></div>
+      <footer class="account"><div class="account-avatar">나</div><div><strong>내 보낸 메일</strong><span id="account-email">로컬 보관함</span></div><span class="connected-dot" title="이 기기의 메일 보관함"></span></footer>
+    </aside>
+    <section class="chat" aria-label="메일 대화">
+      <header class="chat-header">
+        <button id="back" class="icon-button mobile-back" aria-label="대화 목록으로"><svg><use href="#back-icon"/></svg></button>
+        <div id="contact-avatar" class="avatar header-avatar">m</div>
+        <div class="contact-heading"><h2 id="contact-name">대화</h2><p id="contact-email" class="contact-email" hidden></p></div>
+        <button id="role-tag" class="role-tag" disabled>직급 지정</button><span id="reply-note" class="reply-note"></span>
+      </header>
+      <div id="chat-error" class="error-banner" role="alert" hidden></div>
+      <div id="timeline" class="timeline" tabindex="0" aria-label="날짜순 메일"></div>
+      <footer class="composer"><label for="prompt-request" class="sr-only">초안 작성 요청</label><textarea id="prompt-request" rows="2" placeholder="메일에 담을 내용" disabled></textarea><button id="copy-prompt" class="primary-button" disabled><svg><use href="#copy-icon"/></svg>프롬프트 복사</button></footer>
+    </section>
+  </main>
+  <dialog id="new-chat-dialog" class="label-dialog" aria-labelledby="new-chat-heading">
+    <div class="editor-heading"><h2 id="new-chat-heading">새 대화</h2></div>
+    <form id="new-chat-form" class="new-chat-form">
+      <label id="new-owner-field" class="field">내 이메일<input id="new-owner" type="email" list="known-owners" required autocomplete="email"></label>
+      <datalist id="known-owners"></datalist>
+      <label class="field">수신자 이메일<input id="new-recipient" type="email" required autocomplete="off" placeholder="name@example.com"></label>
+      <label class="field">이름 (선택)<input id="new-name" maxlength="100" autocomplete="off"></label>
+      <label class="field">직급 (선택)<input id="new-role" list="new-known-labels" maxlength="100" placeholder="예: 교수, 팀장" autocomplete="off"></label>
+      <datalist id="new-known-labels"></datalist>
+      <p id="new-chat-error" class="editor-error" role="alert" hidden></p>
+      <footer class="label-footer"><button id="cancel-new-chat" type="button" class="text-button">취소</button><button id="create-chat" type="submit" class="primary-button">대화 시작</button></footer>
+    </form>
+  </dialog>
+  <dialog id="editor" aria-labelledby="editor-heading">
+    <div class="editor-heading"><h2 id="editor-heading">문체 편집</h2><button id="close-editor" class="icon-button" aria-label="편집기 닫기"><svg><use href="#close-icon"/></svg></button></div>
+    <div class="editor-intro"><h3 id="editor-subject"></h3><p id="editor-date"></p></div>
+    <div class="editor-tabs" role="tablist" aria-label="메일 보기 방식"><button id="tab-edit" role="tab" aria-selected="true" aria-controls="panel-edit">내가 쓴 본문</button><button id="tab-original" role="tab" aria-selected="false" tabindex="-1" aria-controls="panel-original">전체 대화 원문</button></div>
+    <div class="editor-scroll">
+      <section id="panel-edit" role="tabpanel" aria-labelledby="tab-edit">
+        <div class="field-heading"><label for="edit-body">문체 참조 본문</label><button id="restore-body" class="text-button">원문에서 다시 가져오기</button></div>
+        <textarea id="edit-body" spellcheck="false"></textarea>
+        <div id="recipient-fields"></div>
+      </section>
+      <section id="panel-original" role="tabpanel" aria-labelledby="tab-original" hidden><pre id="original-body"></pre><p id="source-name" class="source-name"></p></section>
+    </div>
+    <p id="editor-error" class="editor-error" role="alert" hidden></p>
+    <footer class="editor-footer"><div><span id="edit-status" role="status"></span><button id="copy-body" class="text-button"><svg><use href="#copy-icon"/></svg>본문 복사</button></div><button id="save" class="primary-button" disabled>변경 저장</button></footer>
+  </dialog>
+  <dialog id="label-editor" class="label-dialog" aria-labelledby="label-heading">
+    <div class="editor-heading"><h2 id="label-heading">직급 라벨</h2><button id="close-label" class="icon-button" aria-label="직급 편집 닫기"><svg><use href="#close-icon"/></svg></button></div>
+    <form id="label-form">
+      <label class="field" for="role-label">상대방의 직급<input id="role-label" list="known-labels" maxlength="100" placeholder="예: 교수, 팀장, 연구원" autocomplete="off"></label>
+      <datalist id="known-labels"></datalist>
+      <p id="label-error" class="editor-error" role="alert" hidden></p>
+      <footer class="label-footer"><button id="clear-label" type="button" class="text-button">라벨 지우기</button><button id="save-label" class="primary-button" type="submit">저장</button></footer>
+    </form>
+  </dialog>
+  <dialog id="delete-dialog" class="label-dialog" aria-labelledby="delete-heading" aria-describedby="delete-description">
+    <div class="editor-heading"><h2 id="delete-heading">정말 삭제하시겠습니까?</h2></div>
+    <div class="delete-content">
+      <p id="delete-description">대화와 문체 참조에서 삭제됩니다. 보관 원문은 유지됩니다.</p>
+      <dl class="delete-details"><dt>제목</dt><dd id="delete-subject"></dd><dt>발신자</dt><dd id="delete-sender"></dd><dt>발신 시각</dt><dd id="delete-date"></dd></dl>
+      <p id="delete-preview"></p>
+      <p id="delete-error" class="editor-error" role="alert" hidden></p>
+      <footer class="label-footer"><button id="cancel-delete" class="text-button" autofocus>취소</button><button id="confirm-delete" class="primary-button danger-button">메시지 삭제</button></footer>
+    </div>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
