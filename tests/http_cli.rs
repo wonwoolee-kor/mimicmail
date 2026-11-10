@@ -84,7 +84,7 @@ fn http_static_assets_host_origin_token_and_edit_conflict() {
             .unwrap()
             .contains("frame-ancestors 'none'")
     );
-    for asset in ["/app.js", "/app.css"] {
+    for asset in ["/app.js", "/app.css", "/label-colors.mjs"] {
         assert_eq!(
             client
                 .get(format!("{}{asset}", server.url))

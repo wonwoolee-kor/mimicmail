@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>Mimicmail · 내 메일함</title>
   <link rel="stylesheet" href="/app.css">
-  <script defer src="/app.js"></script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
   <svg class="icons" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -73,8 +73,13 @@
     <form id="label-form">
       <label class="field" for="role-label">상대방의 직급<input id="role-label" list="known-labels" maxlength="100" placeholder="예: 교수, 팀장, 연구원" autocomplete="off"></label>
       <datalist id="known-labels"></datalist>
-      <div class="color-fields"><label class="field">라벨 색상<input id="label-color-picker" type="color" value="#808080"></label><label class="field">색상 코드<input id="label-color-value" placeholder="#RRGGBB" pattern="#[0-9a-fA-F]{6}" maxlength="7" autocomplete="off"></label></div>
-      <div class="color-preview-row"><span id="label-color-preview" class="rank-chip">라벨</span><button id="clear-color" type="button" class="text-button">색상 없음</button></div>
+      <div class="hue-field">
+        <div class="field-heading"><label for="label-hue">색상</label><output id="label-hue-name" for="label-hue">색상 없음</output></div>
+        <input id="label-hue" type="range" min="25" max="305" step="5" value="25" aria-valuetext="색상 없음">
+        <div class="hue-endpoints" aria-hidden="true"><span>빨강</span><span>보라</span></div>
+        <input id="label-color-value" type="hidden">
+      </div>
+      <div class="color-preview-row"><div id="label-color-preview" class="color-preview"><div id="label-preview-avatar" class="avatar"></div><div><strong id="label-preview-name"></strong><span id="label-preview-role" class="rank-chip"></span></div></div><button id="clear-color" type="button" class="text-button">색상 없음</button></div>
       <p id="label-error" class="editor-error" role="alert" hidden></p>
       <footer class="label-footer"><button id="clear-label" type="button" class="text-button">라벨 지우기</button><button id="save-label" class="primary-button" type="submit">저장</button></footer>
     </form>

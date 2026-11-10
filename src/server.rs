@@ -67,6 +67,10 @@ async fn handle(
                 include_bytes!("../assets/app.js"),
                 "text/javascript; charset=utf-8",
             )),
+            "/label-colors.mjs" => Some((
+                include_bytes!("../assets/label-colors.mjs"),
+                "text/javascript; charset=utf-8",
+            )),
             "/app.css" => Some((
                 include_bytes!("../assets/app.css"),
                 "text/css; charset=utf-8",

@@ -1,3 +1,5 @@
+import {labelHue,labelHex,labelCss} from './label-colors.mjs';
+
 const $ = id => document.getElementById(id);
 const state = {data:null, current:null, messages:[], timeline:[], reference:null, creating:false, query:'', label:'', unlabeled:false, matches:[], matchIndex:-1, loadedQuery:'', listPending:false, labelSaving:false, deleting:null, deleteSaving:false, listRequest:0, chatRequest:0, editing:null, dirty:false, saving:false};
 const requests = new Map();
@@ -10,9 +12,9 @@ function fullDate(date){return date ? new Intl.DateTimeFormat('ko-KR',{timeZone:
 function clockTime(date){return date ? new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(date)) : '';}
 function avatar(name){return el('div','avatar',initials(name));}
 function applyLabelColor(node,color){
-  const colored=/^#[0-9a-f]{6}$/i.test(color||'');
-  node.classList.toggle('colored',colored);
-  if(colored)node.style.setProperty('--label-color',color);else node.style.removeProperty('--label-color');
+  const hue=labelHue(color);
+  node.classList.toggle('colored',hue!==null);
+  if(hue!==null)node.style.setProperty('--label-color',labelCss(hue));else node.style.removeProperty('--label-color');
 }
 function sameContact(a,b){return a&&b&&a.owner===b.owner&&a.recipient===b.recipient;}
 function contactKey(contact){return JSON.stringify([contact.owner,contact.recipient]);}
@@ -245,13 +247,19 @@ function openLabel(){
   syncLabelColor();$('label-editor').showModal();$('role-label').focus();
 }
 function syncLabelColor(){
-  const saved=state.data.label_colors[$('role-label').value.trim()];
-  $('label-color-value').value=saved?.color||'';$('label-color-picker').value=saved?.color||'#808080';
+  const saved=state.data.label_colors[labelChoiceValue('role-label')];
+  const hue=labelHue(saved?.color);
+  $('label-color-value').value=hue===null?'':labelHex(hue);$('label-hue').value=hue??25;
   previewLabelColor();
 }
 function previewLabelColor(){
-  const color=$('label-color-value').value.trim();
-  $('label-color-preview').textContent=$('role-label').value.trim()||'라벨';
+  const color=$('label-color-value').value,hue=labelHue(color);
+  const name=hue===null?'색상 없음':hue<45?'빨강':hue<85?'주황':hue<125?'노랑':hue<175?'초록':hue<225?'청록':hue<275?'파랑':'보라';
+  $('label-preview-avatar').textContent=initials(state.current.name);
+  $('label-preview-name').textContent=state.current.name;
+  $('label-preview-role').textContent=labelChoiceValue('role-label')||'미지정';
+  $('label-hue-name').textContent=name;$('label-hue').setAttribute('aria-valuetext',name);
+  $('label-hue').style.setProperty('--label-color',hue===null?'#777':labelCss(hue));
   applyLabelColor($('label-color-preview'),color);
 }
 async function saveLabel(){
@@ -323,8 +331,7 @@ $('label-form').addEventListener('submit',event=>{event.preventDefault();saveLab
 $('close-label').addEventListener('click',()=>{if(!state.labelSaving)$('label-editor').close();});
 $('label-editor').addEventListener('cancel',event=>{if(state.labelSaving)event.preventDefault();});
 $('role-label').addEventListener('input',syncLabelColor);
-$('label-color-picker').addEventListener('input',()=>{$('label-color-value').value=$('label-color-picker').value;previewLabelColor();});
-$('label-color-value').addEventListener('input',()=>{const value=$('label-color-value').value;if(/^#[0-9a-f]{6}$/i.test(value))$('label-color-picker').value=value;previewLabelColor();});
+$('label-hue').addEventListener('input',()=>{$('label-color-value').value=labelHex(Number($('label-hue').value));previewLabelColor();});
 $('clear-color').addEventListener('click',()=>{$('label-color-value').value='';previewLabelColor();});
 $('previous-match').addEventListener('click',()=>moveSearchMatch(-1));
 $('next-match').addEventListener('click',()=>moveSearchMatch(1));
