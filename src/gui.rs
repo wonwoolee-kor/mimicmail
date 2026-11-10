@@ -1151,25 +1151,10 @@ pub fn selected_context(
     )
 }
 
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\"'\"'"))
-}
-pub fn prompt_reference(db_path: &Path, owner: &str, recipient: &str) -> Result<Value> {
+pub fn prompt_reference(db_path: &Path) -> Result<Value> {
     let path = std::path::absolute(db_path)?;
-    let binary = std::env::current_exe()?;
-    let command = [
-        binary.to_string_lossy().as_ref(),
-        "--db",
-        path.to_string_lossy().as_ref(),
-        "--user",
-        owner,
-        "context",
-        "--to",
-        recipient,
-    ]
-    .map(shell_quote)
-    .join(" ");
-    Ok(
-        json!({"database_path":path,"project_path":env!("CARGO_MANIFEST_DIR"),"context_command":command}),
-    )
+    let path = path
+        .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+        .unwrap_or(&path);
+    Ok(json!({"database_path":path}))
 }

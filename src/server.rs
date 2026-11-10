@@ -222,8 +222,7 @@ async fn handle(
                             &work,
                         )
                     })?;
-                    result["prompt_reference"] =
-                        gui::prompt_reference(&state.path, arg("owner"), arg("recipient"))?;
+                    result["prompt_reference"] = gui::prompt_reference(&state.path)?;
                     return Ok(serde_json::to_vec(&result)?);
                 }
                 let mut result = gui::conversation(&db, arg("owner"), arg("recipient"))?;
@@ -237,8 +236,7 @@ async fn handle(
                         .map(|m| crate::select(m, &["id", "subject", "revision", "deleted"]))
                         .collect();
                 }
-                result["prompt_reference"] =
-                    gui::prompt_reference(&state.path, arg("owner"), arg("recipient"))?;
+                result["prompt_reference"] = gui::prompt_reference(&state.path)?;
                 result
             }
             ("GET", _, Some(id)) => gui::get_mail(&db, id)?,

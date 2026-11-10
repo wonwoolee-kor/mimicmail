@@ -357,11 +357,9 @@ fn http_create_delete_validation_and_readonly_context() {
         .unwrap()
         .json::<Value>()
         .unwrap();
-    assert!(
-        data["prompt_reference"]["context_command"]
-            .as_str()
-            .unwrap()
-            .contains("mimicmail' '--db'")
+    assert_eq!(
+        data["prompt_reference"],
+        json!({"database_path":server.dbpath()})
     );
     let item = data["timeline"]
         .as_array()
