@@ -145,8 +145,13 @@ async fn handle(
             .and_then(|s| s.parse::<i64>().ok());
         let result = match (method.as_str(), path.as_str(), id) {
             ("GET", "/api/conversations", _) => {
-                let mut result =
-                    gui::conversations(&db, arg("q"), arg("replies") == "1", arg("label"))?;
+                let mut result = gui::conversations_filtered(
+                    &db,
+                    arg("q"),
+                    arg("replies") == "1",
+                    arg("label"),
+                    arg("unlabeled") == "1",
+                )?;
                 result["token"] = json!(state.token);
                 result["purposes"] = gui::labels(&pipeline::PURPOSES, &gui::PURPOSE_LABELS);
                 result["relationships"] =
@@ -155,6 +160,10 @@ async fn handle(
             }
             ("GET", "/api/conversation", _) => {
                 let mut result = gui::conversation(&db, arg("owner"), arg("recipient"))?;
+                result["search_matches"] = json!(gui::search_matches(
+                    crate::array(&result, "timeline"),
+                    arg("q")
+                ));
                 if arg("compact") == "1" {
                     result["messages"] = crate::array(&result, "messages")
                         .iter()

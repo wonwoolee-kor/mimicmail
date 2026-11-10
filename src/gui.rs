@@ -52,39 +52,58 @@ fn chars(s: &str, start: usize, length: usize) -> String {
     s.chars().skip(start).take(length).collect()
 }
 pub fn first_search_match(items: &[Value], query: &str) -> Option<Value> {
+    find_search_matches(items, query, 1)
+        .first()
+        .map(|m| select(m, &["key", "field", "term", "preview"]))
+}
+pub fn search_matches(items: &[Value], query: &str) -> Vec<Value> {
+    find_search_matches(items, query, usize::MAX)
+}
+fn find_search_matches(items: &[Value], query: &str, limit: usize) -> Vec<Value> {
+    let query = fold(query.trim());
     if query.is_empty() {
-        return None;
+        return Vec::new();
     }
+    let mut matches = Vec::new();
     for item in items {
         for field in ["body", "subject"] {
             let value = text(item, field);
             let folded = fold(value);
-            let Some(offset) = folded.find(query) else {
+            if !folded.contains(&query) {
                 continue;
-            };
+            }
             let mut positions = Vec::with_capacity(folded.len());
             for (index, c) in value.chars().enumerate() {
                 for folded in c.case_fold() {
                     positions.extend(std::iter::repeat_n(index, folded.len_utf8()));
                 }
             }
-            let start = positions[offset];
-            let end = positions[offset + query.len() - 1] + 1;
-            let left = start.saturating_sub(12);
-            let count = value.chars().count();
-            let right = (left + 140).max(end).min(count);
-            let preview = format!(
-                "{}{}{}",
-                if left > 0 { "…" } else { "" },
-                chars(value, left, right - left),
-                if right < count { "…" } else { "" }
-            );
-            return Some(
-                json!({"key":item["keys"][0],"field":field,"term":chars(value,start,end-start),"preview":preview}),
-            );
+            let mut previous_end = 0;
+            for (offset, _) in folded.match_indices(&query) {
+                let start = positions[offset];
+                let end = positions[offset + query.len() - 1] + 1;
+                if start < previous_end {
+                    continue;
+                }
+                previous_end = end;
+                let left = start.saturating_sub(12);
+                let count = value.chars().count();
+                let right = (left + 140).max(end).min(count);
+                let preview = format!(
+                    "{}{}{}",
+                    if left > 0 { "…" } else { "" },
+                    chars(value, left, right - left),
+                    if right < count { "…" } else { "" }
+                );
+                matches.push(json!({"key":item["keys"][0],"field":field,"term":chars(value,start,end-start),"preview":preview,
+                "start":chars(value,0,start).encode_utf16().count(),"end":chars(value,0,end).encode_utf16().count()}));
+                if matches.len() == limit {
+                    return matches;
+                }
+            }
         }
     }
-    None
+    matches
 }
 pub fn get_mail(db: &Connection, id: i64) -> Result<Value> {
     let mut item = db::one(db, "SELECT * FROM mail_archive WHERE id=?", [id])?
@@ -151,6 +170,15 @@ pub fn conversations(
     replies: bool,
     label_filter: &str,
 ) -> Result<Value> {
+    conversations_filtered(db, query, replies, label_filter, false)
+}
+pub fn conversations_filtered(
+    db: &Connection,
+    query: &str,
+    replies: bool,
+    label_filter: &str,
+    unlabeled: bool,
+) -> Result<Value> {
     let mut contacts: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut statement = db.prepare_cached("SELECT a.owner,s.recipient,a.context_json FROM mail_archive a JOIN sent_mail s ON a.owner=s.owner AND a.fingerprint=s.fingerprint ORDER BY a.sent_at DESC,a.id DESC")?;
     let mut rows = statement.query([])?;
@@ -187,6 +215,15 @@ pub fn conversations(
         );
     }
     let label_rows = db::rows(db, "SELECT * FROM contact_labels", [])?;
+    let colors: serde_json::Map<String, Value> = db::rows(db, "SELECT * FROM label_colors", [])?
+        .into_iter()
+        .map(|row| {
+            (
+                text(&row, "label").to_owned(),
+                select(&row, &["color", "revision"]),
+            )
+        })
+        .collect();
     let mut groups = Vec::new();
     let mut all_ids = HashSet::new();
     let mut reply_ids = HashSet::new();
@@ -247,7 +284,7 @@ pub fn conversations(
                         .is_some_and(|i| fold(PURPOSE_LABELS[i]).contains(&query))
                 })
             });
-        groups.push(json!({"owner":owner,"recipient":recipient,"name":if name.is_empty() {recipient.split('@').next().unwrap_or("")} else {name},"label":label_text,"label_revision":label.map(|l| l["revision"].clone()).unwrap_or(json!(0)),"count":active.len(),"registered":registered.is_some(),"reply_count":reply_count,"latest":latest["sent_at"],"subject":latest["subject"],"preview":chars(text(latest,"body"),0,140),"search_match":match_info,"matches":matches_query && (!replies || reply_count>0) && (label_filter.is_empty() || label_text==label_filter)}));
+        groups.push(json!({"owner":owner,"recipient":recipient,"name":if name.is_empty() {recipient.split('@').next().unwrap_or("")} else {name},"label":label_text,"label_color":colors.get(label_text).map(|c|text(c,"color")).unwrap_or(""),"label_revision":label.map(|l| l["revision"].clone()).unwrap_or(json!(0)),"count":active.len(),"registered":registered.is_some(),"reply_count":reply_count,"latest":latest["sent_at"],"subject":latest["subject"],"preview":chars(text(latest,"body"),0,140),"search_match":match_info,"matches":matches_query && (!replies || reply_count>0) && (if unlabeled {label_text.is_empty()} else {label_filter.is_empty() || label_text==label_filter})}));
     }
     groups.sort_by_key(|g| {
         std::cmp::Reverse(
@@ -262,7 +299,7 @@ pub fn conversations(
         .filter(|l| !l.is_empty())
         .collect();
     Ok(
-        json!({"total_mails":all_ids.len(),"total_conversations":groups.len(),"reply_mails":reply_ids.len(),"owners":owners,"labels":labels,"items":groups.into_iter().filter(|g|g["matches"]==true).collect::<Vec<_>>()}),
+        json!({"total_mails":all_ids.len(),"total_conversations":groups.len(),"reply_mails":reply_ids.len(),"owners":owners,"labels":labels,"label_colors":colors,"items":groups.into_iter().filter(|g|g["matches"]==true).collect::<Vec<_>>()}),
     )
 }
 fn string<'a>(payload: &'a Value, key: &str, message: &str) -> Result<&'a str> {
@@ -405,6 +442,38 @@ fn update_label_inner(db: &Connection, payload: &Value) -> Result<Value> {
 pub fn update_contact_label(db: &Connection, payload: &Value) -> Result<Value> {
     let tx = immediate(db)?;
     let result = update_label_inner(&tx, payload)?;
+    if let Some(color) = payload.get("color") {
+        let color = color
+            .as_str()
+            .ok_or_else(|| fault(400, "색상은 #RRGGBB 형식으로 입력하세요."))?;
+        if !color.is_empty()
+            && !(color.len() == 7
+                && color.starts_with('#')
+                && color[1..].bytes().all(|c| c.is_ascii_hexdigit()))
+        {
+            return Err(fault(400, "색상은 #RRGGBB 형식으로 입력하세요."));
+        }
+        let label = text(&result, "label");
+        if !label.is_empty() {
+            let version = payload["color_revision"]
+                .as_i64()
+                .ok_or_else(|| fault(400, "색상의 수정 버전이 올바르지 않습니다."))?;
+            let current = db::one(
+                &tx,
+                "SELECT revision FROM label_colors WHERE label=?",
+                [label],
+            )?
+            .map(|v| v["revision"].as_i64().unwrap())
+            .unwrap_or(0);
+            if current != version {
+                return Err(fault(
+                    409,
+                    "다른 창에서 변경된 색상입니다. 새로고침 후 다시 지정하세요.",
+                ));
+            }
+            tx.execute("INSERT INTO label_colors(label,color,revision) VALUES (?,?,1) ON CONFLICT(label) DO UPDATE SET color=excluded.color,revision=label_colors.revision+1",params![label,color.to_lowercase()])?;
+        }
+    }
     tx.commit()?;
     Ok(result)
 }

@@ -38,6 +38,7 @@
         <div class="contact-heading"><h2 id="contact-name">대화</h2><p id="contact-email" class="contact-email" hidden></p></div>
         <button id="role-tag" class="role-tag" disabled>직급 지정</button><span id="reply-note" class="reply-note"></span>
       </header>
+      <div id="search-navigation" class="search-navigation" hidden><span id="search-position" role="status" aria-live="polite"></span><button id="previous-match" class="text-button" aria-label="이전 검색 결과">이전</button><button id="next-match" class="text-button" aria-label="다음 검색 결과">다음</button></div>
       <div id="chat-error" class="error-banner" role="alert" hidden></div>
       <div id="timeline" class="timeline" tabindex="0" aria-label="날짜순 메일"></div>
       <footer class="composer"><label for="prompt-request" class="sr-only">초안 작성 요청</label><textarea id="prompt-request" rows="2" placeholder="메일에 담을 내용" disabled></textarea><button id="copy-prompt" class="primary-button" disabled><svg><use href="#copy-icon"/></svg>프롬프트 복사</button></footer>
@@ -76,6 +77,8 @@
     <form id="label-form">
       <label class="field" for="role-label">상대방의 직급<input id="role-label" list="known-labels" maxlength="100" placeholder="예: 교수, 팀장, 연구원" autocomplete="off"></label>
       <datalist id="known-labels"></datalist>
+      <div class="color-fields"><label class="field">라벨 색상<input id="label-color-picker" type="color" value="#808080"></label><label class="field">색상 코드<input id="label-color-value" placeholder="#RRGGBB" pattern="#[0-9a-fA-F]{6}" maxlength="7" autocomplete="off"></label></div>
+      <div class="color-preview-row"><span id="label-color-preview" class="rank-chip">라벨</span><button id="clear-color" type="button" class="text-button">색상 없음</button></div>
       <p id="label-error" class="editor-error" role="alert" hidden></p>
       <footer class="label-footer"><button id="clear-label" type="button" class="text-button">라벨 지우기</button><button id="save-label" class="primary-button" type="submit">저장</button></footer>
     </form>

@@ -46,6 +46,12 @@ fn existing_database_search_edit_labels_and_deletion_match_python() {
                 key => gui::conversations(&db, key.strip_prefix("search:").unwrap(), false, "")
                     .unwrap(),
             };
+            actual.as_object_mut().unwrap().remove("label_colors");
+            if let Some(items) = actual.get_mut("items").and_then(Value::as_array_mut) {
+                for item in items {
+                    item.as_object_mut().unwrap().remove("label_color");
+                }
+            }
             let mut expected = expected.clone();
             clean(&mut actual);
             clean(&mut expected);

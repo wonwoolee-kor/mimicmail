@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = {data:null, current:null, messages:[], timeline:[], reference:null, creating:false, query:'', replies:false, label:'', labelSaving:false, deleting:null, deleteSaving:false, listRequest:0, chatRequest:0, editing:null, dirty:false, saving:false};
+const state = {data:null, current:null, messages:[], timeline:[], reference:null, creating:false, query:'', replies:false, label:'', unlabeled:false, matches:[], matchIndex:-1, loadedQuery:'', listPending:false, labelSaving:false, deleting:null, deleteSaving:false, listRequest:0, chatRequest:0, editing:null, dirty:false, saving:false};
 const requests = new Map();
 let listController, chatController, editorController;
 const icon = name => { const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); const use=document.createElementNS(svg.namespaceURI,'use'); use.setAttribute('href',`#${name}-icon`);svg.append(use);svg.setAttribute('aria-hidden','true');return svg; };
@@ -9,7 +9,12 @@ function initials(name){return name.replace(/[<>"\s]/g,'').slice(0,2);}
 function shortDate(date){return date ? new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric'}).format(new Date(date)) : '날짜 미상';}
 function fullDate(date){return date ? new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'long',day:'numeric',weekday:'short'}).format(new Date(date)) : '날짜 미상';}
 function clockTime(date){return date ? new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(date)) : '';}
-function avatar(name,index=0){return el('div',`avatar tone-${index%4}`,initials(name));}
+function avatar(name){return el('div','avatar',initials(name));}
+function applyLabelColor(node,color){
+  const colored=/^#[0-9a-f]{6}$/i.test(color||'');
+  node.classList.toggle('colored',colored);
+  if(colored)node.style.setProperty('--label-color',color);else node.style.removeProperty('--label-color');
+}
 function sameContact(a,b){return a&&b&&a.owner===b.owner&&a.recipient===b.recipient;}
 function contactKey(contact){return JSON.stringify([contact.owner,contact.recipient]);}
 function highlight(node,term){
@@ -19,19 +24,47 @@ function highlight(node,term){
   node.replaceChildren(document.createTextNode(text.slice(0,index)),mark,document.createTextNode(text.slice(index+term.length)));
   return mark;
 }
-function clearSearchMatch(){for(const mark of $('timeline').querySelectorAll('mark.search-match')){const parent=mark.parentNode;mark.replaceWith(document.createTextNode(mark.textContent));parent.normalize();}}
-function showSearchMatch(contact){
-  clearSearchMatch();
-  const match=contact.search_match;if(!match)return;
-  const index=state.timeline.findIndex(item=>item.keys.includes(match.key));if(index<0)return;
-  const row=$('timeline').querySelector(`[data-message-index="${index}"]`);
-  const target=match.field==='body'?row.querySelector('.message-body'):row.previousElementSibling;
-  const mark=highlight(target,match.term);if(!mark)return;
-  if(match.field==='body'){
-    target.classList.add('expanded');const toggle=target.nextElementSibling;
-    toggle.textContent='접기';toggle.setAttribute('aria-expanded','true');updateMessageToggles();
-  }
+function clearSearchMatch(){
+  for(const mark of $('timeline').querySelectorAll('mark.search-match')){const parent=mark.parentNode;mark.replaceWith(document.createTextNode(mark.textContent));parent.normalize();}
+  state.matches=[];state.matchIndex=-1;$('search-navigation').hidden=true;
+}
+function moveSearchMatch(step){
+  if(!state.matches.length)return;
+  state.matches[state.matchIndex]?.classList.remove('current-match');
+  state.matchIndex=(state.matchIndex+step+state.matches.length)%state.matches.length;
+  const mark=state.matches[state.matchIndex];mark.classList.add('current-match');
+  const body=mark.closest('.message-body');
+  if(body){body.classList.add('expanded');const toggle=body.nextElementSibling;toggle.textContent='접기';toggle.setAttribute('aria-expanded','true');}
+  $('search-position').textContent=`${state.matchIndex+1} / ${state.matches.length}`;
   mark.scrollIntoView({block:'center'});
+}
+function showSearchMatches(matches){
+  clearSearchMatch();
+  if(!state.query.trim())return;
+  const targets=new Map();
+  for(const match of matches){
+    const index=state.timeline.findIndex(item=>item.keys.includes(match.key));
+    const node=match.field==='body'?$('timeline').querySelector(`[data-message-index="${index}"] .message-body`):$('timeline').querySelector(`[data-topic-index="${index}"]`);
+    if(node){if(!targets.has(node))targets.set(node,[]);targets.get(node).push(match);}
+  }
+  for(const [node,ranges] of targets){
+    const text=node.textContent,parts=[];let offset=0;
+    for(const range of ranges){parts.push(document.createTextNode(text.slice(offset,range.start)),el('mark','search-match',text.slice(range.start,range.end)));offset=range.end;}
+    parts.push(document.createTextNode(text.slice(offset)));node.replaceChildren(...parts);
+  }
+  state.matches=[...$('timeline').querySelectorAll('mark.search-match')];
+  $('search-navigation').hidden=false;$('search-position').textContent=`0 / ${state.matches.length}`;
+  $('previous-match').disabled=$('next-match').disabled=!state.matches.length;
+  moveSearchMatch(1);
+}
+function clearConversation(){
+  ++state.chatRequest;chatController?.abort();editorController?.abort();
+  state.current=null;state.reference=null;state.messages=[];state.timeline=[];clearSearchMatch();
+  $('contact-name').textContent='대화';$('contact-email').textContent='';$('contact-email').hidden=true;
+  $('contact-avatar').textContent='m';$('role-tag').textContent='직급 지정';$('role-tag').disabled=true;
+  $('reply-note').textContent='';$('timeline').replaceChildren();$('prompt-request').value='';
+  $('prompt-request').disabled=true;$('copy-prompt').disabled=true;applyLabelColor(document.querySelector('.chat'),'');
+  document.querySelector('.app').classList.remove('show-chat');
 }
 function error(message){$('chat-error').textContent=message;$('chat-error').hidden=!message;}
 let toastTimer;
@@ -41,51 +74,55 @@ async function api(path, options={}){const response=await fetch(path,options);co
 async function loadConversations({refreshChat=false}={}){
   const request=++state.listRequest;
   listController?.abort();listController=new AbortController();
+  state.listPending=true;$('conversations').inert=true;$('copy-prompt').disabled=true;$('prompt-request').disabled=true;
   $('list-status').textContent='불러오는 중…';
   $('refresh').disabled=true;
   try{
-    const data=await api(`/api/conversations?${new URLSearchParams({q:state.query,replies:state.replies?'1':'0',label:state.label})}`,{signal:listController.signal});
+    const data=await api(`/api/conversations?${new URLSearchParams({q:state.query,replies:state.replies?'1':'0',label:state.label,unlabeled:state.unlabeled?'1':'0'})}`,{signal:listController.signal});
     if(request!==state.listRequest)return;
     state.data=data;$('new-chat').disabled=false;
     $('library-summary').textContent=`보낸 메일 ${data.total_mails}통 · ${data.total_conversations}개의 대화`;
     const selected=data.items.find(item=>sameContact(item,state.current));
-    if(selected)state.current=selected;
-    $('filter-label').replaceChildren(new Option('모든 직급',''),...data.labels.map(label=>new Option(label,label)));
-    $('filter-label').value=state.label;
+    if(selected)state.current=selected;else clearConversation();
+    $('filter-label').replaceChildren(new Option('모든 직급',''),new Option('미지정','unlabeled'),...data.labels.map(label=>new Option(label,`label:${label}`)));
+    $('filter-label').value=state.unlabeled?'unlabeled':state.label?`label:${state.label}`:'';
     $('account-email').textContent=data.owners.join(', ');
     $('list-status').textContent=state.query?`검색 결과 ${data.items.length}개`:'';
     renderContacts();error('');
-    if(!state.current&&data.items.length&&!matchMedia('(max-width:700px)').matches)await openConversation(data.items[0]);
-    else if(refreshChat&&state.current)await openConversation(state.current,true);
-  }catch(e){if(request===state.listRequest){$('list-status').textContent='목록 로드 실패 · 새로고침하세요.';error(e.message);}}
-  finally{if(request===state.listRequest)$('refresh').disabled=false;}
+    if(state.current){
+      applyLabelColor(document.querySelector('.chat'),state.current.label_color);
+      $('role-tag').textContent=state.current.label||'직급 지정';
+      if(refreshChat||state.loadedQuery!==state.query||!state.reference)await openConversation(state.current,state.loadedQuery===state.query);
+    }
+  }catch(e){if(e.name!=='AbortError'&&request===state.listRequest){clearConversation();$('list-status').textContent='목록 로드 실패 · 새로고침하세요.';error(e.message);}}
+  finally{if(request===state.listRequest){state.listPending=false;$('conversations').inert=false;$('refresh').disabled=false;$('copy-prompt').disabled=$('prompt-request').disabled=!state.reference;}}
 }
 function renderContacts(){
   const list=$('conversations');list.replaceChildren();
-  state.data.items.forEach((item,index)=>{
+  state.data.items.forEach(item=>{
     const row=button('',`conversation-row${sameContact(item,state.current)?' selected':''}`,()=>openConversation(item));
     row.setAttribute('aria-label',`${item.name}, 보낸 메일 ${item.count}통${item.reply_count?', 답장·인용 있음':''}`);
     row.setAttribute('aria-current',sameContact(item,state.current)?'true':'false');
-    row.append(avatar(item.name,index));
+    applyLabelColor(row,item.label_color);row.append(avatar(item.name));
     const content=el('div'),top=el('div','row-top');top.append(el('span','row-name',item.name),el('time','row-time',shortDate(item.latest)));
-    const name=top.firstChild;if(item.label)name.append(el('span','rank-chip',item.label));
+    top.firstChild.title=item.name;
     const preview=el('p','row-subject',item.search_match?.preview||item.preview||item.subject||(item.registered?'새 대화':'(본문 없음)'));
     if(item.search_match)highlight(preview,item.search_match.term);
-    content.append(top,preview);
+    content.append(top);if(item.label)content.append(el('span','rank-chip',item.label));content.append(preview);
     const bottom=el('div','row-bottom');
     if(item.reply_count){const badge=el('span','reply-badge');badge.append(icon('reply'),document.createTextNode('답장·인용'));bottom.append(badge);}
 
     bottom.append(el('span','row-count',`${item.count}통`));content.append(bottom);row.append(content);list.append(row);
   });
-  if(!state.data.items.length)list.append(el('div','empty-list',state.data.total_mails?'검색 결과 없음':'메일 없음'));
+  if(!state.data.items.length)list.append(el('div','empty-list',state.query||state.label||state.unlabeled||state.replies?'검색 결과 없음':'메일 없음'));
 }
 async function openConversation(contact,keepScroll=false){
   document.querySelector('.app').classList.add('show-chat');
-  if(sameContact(contact,state.current)&&state.reference&&!keepScroll){showSearchMatch(contact);return;}
-  const request=++state.chatRequest;const oldScroll=$('timeline').scrollTop;
+  if(sameContact(contact,state.current)&&state.reference&&!keepScroll&&state.loadedQuery===state.query){if(state.matches.length)moveSearchMatch(0);return;}
+  const request=++state.chatRequest,query=state.query;const oldScroll=$('timeline').scrollTop;
   chatController?.abort();chatController=new AbortController();editorController?.abort();
   state.messages=[];state.timeline=[];
-  state.current=contact;renderContacts();
+  state.current=contact;renderContacts();clearSearchMatch();applyLabelColor(document.querySelector('.chat'),contact.label_color);
   $('contact-name').textContent=contact.name;
   $('contact-email').textContent=contact.recipient;$('contact-email').hidden=false;
   $('contact-avatar').textContent=initials(contact.name);
@@ -95,20 +132,20 @@ async function openConversation(contact,keepScroll=false){
   $('prompt-request').value=requests.get(contactKey(contact))||'';
   if(!keepScroll){$('timeline').replaceChildren(...Array.from({length:3},()=>el('div','loading-line')));}
   try{
-    const data=await api(`/api/conversation?${new URLSearchParams({owner:contact.owner,recipient:contact.recipient,compact:'1'})}`,{signal:chatController.signal});
-    if(request!==state.chatRequest)return;
-    state.messages=data.messages;state.timeline=data.timeline;state.reference=data.prompt_reference;renderTimeline();error('');
-    $('copy-prompt').disabled=false;$('prompt-request').disabled=false;
+    const data=await api(`/api/conversation?${new URLSearchParams({owner:contact.owner,recipient:contact.recipient,compact:'1',q:state.query})}`,{signal:chatController.signal});
+    if(request!==state.chatRequest||query!==state.query)return;
+    state.messages=data.messages;state.timeline=data.timeline;state.reference=data.prompt_reference;state.loadedQuery=state.query;renderTimeline(data.search_matches);error('');
+    $('copy-prompt').disabled=$('prompt-request').disabled=state.listPending;
     $('timeline').scrollTop=keepScroll?oldScroll:$('timeline').scrollHeight;
-    if(!keepScroll)showSearchMatch(contact);
-  }catch(e){if(request===state.chatRequest){error(e.message);$('timeline').replaceChildren(el('div','empty-list','메일 로드 실패 · 새로고침하세요.'));}}
+    showSearchMatches(data.search_matches);
+  }catch(e){if(e.name!=='AbortError'&&request===state.chatRequest){error(e.message);$('timeline').replaceChildren(el('div','empty-list','메일 로드 실패 · 새로고침하세요.'));}}
 }
-function renderTimeline(){
+function renderTimeline(matches=[]){
   const timeline=$('timeline');timeline.replaceChildren();let previousDay='',previousTopic='';
   state.timeline.forEach((item,index)=>{
     const day=fullDate(item.sent_at);
     if(day!==previousDay){const divider=el('div','date-divider');divider.append(el('span','',day));timeline.append(divider);previousDay=day;}
-    if(item.subject&&item.subject!==previousTopic){timeline.append(el('div','topic-divider',item.subject));previousTopic=item.subject;}
+    if(item.subject&&(item.subject!==previousTopic||matches.some(match=>match.field==='subject'&&item.keys.includes(match.key)))){const topic=el('div','topic-divider',item.subject);topic.dataset.topicIndex=index;timeline.append(topic);previousTopic=item.subject;}
     const row=el('article',`message-row${item.mine?' mine':''}`),bubble=el('div','message');
     row.dataset.messageIndex=index;
     if(!item.mine&&item.sender!==state.current.recipient)bubble.append(el('strong','message-sender',item.sender_name));
@@ -178,7 +215,7 @@ async function createChat(){
   try{
     const result=await api('/api/conversation',{method:'POST',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:$('new-owner').value,recipient:$('new-recipient').value,name:$('new-name').value,label:$('new-role').value})});
     $('new-chat-dialog').close();
-    clearTimeout(searchTimer);state.query='';state.label='';state.replies=false;$('search').value='';
+    clearTimeout(searchTimer);state.query='';state.label='';state.unlabeled=false;state.replies=false;$('search').value='';
     $('filter-all').classList.add('active');$('filter-all').setAttribute('aria-pressed','true');
     $('filter-replies').classList.remove('active');$('filter-replies').setAttribute('aria-pressed','false');
     await loadConversations();await openConversation(result.contact);$('prompt-request').focus();
@@ -203,7 +240,7 @@ async function deleteMessage(){
     await api('/api/message',{method:'DELETE',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:contact.owner,recipient:contact.recipient,key:item.keys[0],revision})});
     $('delete-dialog').close();state.deleting=null;
     await loadConversations({refreshChat:true});
-    if(!state.timeline.length&&!state.current.registered){state.current=null;state.messages=[];renderContacts();$('contact-name').textContent='대화';$('contact-email').textContent='';$('contact-email').hidden=true;$('contact-avatar').textContent='m';$('role-tag').textContent='직급 지정';$('role-tag').disabled=true;$('reply-note').textContent='';$('prompt-request').value='';$('prompt-request').disabled=true;$('copy-prompt').disabled=true;state.reference=null;}
+
     toast('메시지 삭제됨');
   }catch(e){$('delete-error').textContent=e.message;$('delete-error').hidden=false;}
   finally{state.deleteSaving=false;$('confirm-delete').disabled=false;$('cancel-delete').disabled=false;}
@@ -212,16 +249,25 @@ function openLabel(){
   if(!state.current)return;
   $('role-label').value=state.current.label||'';$('label-error').hidden=true;
   $('known-labels').replaceChildren(...state.data.labels.map(label=>new Option(label,label)));
-  $('label-editor').showModal();$('role-label').focus();
+  syncLabelColor();$('label-editor').showModal();$('role-label').focus();
+}
+function syncLabelColor(){
+  const saved=state.data.label_colors[$('role-label').value.trim()];
+  $('label-color-value').value=saved?.color||'';$('label-color-picker').value=saved?.color||'#808080';
+  previewLabelColor();
+}
+function previewLabelColor(){
+  const color=$('label-color-value').value.trim();
+  $('label-color-preview').textContent=$('role-label').value.trim()||'라벨';
+  applyLabelColor($('label-color-preview'),color);
 }
 async function saveLabel(){
   if(state.labelSaving)return;
   const contact=state.current;state.labelSaving=true;
   for(const node of $('label-editor').querySelectorAll('input,button'))node.disabled=true;
   try{
-    const result=await api('/api/contact-label',{method:'PUT',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:contact.owner,recipient:contact.recipient,label:$('role-label').value,revision:contact.label_revision})});
+    const result=await api('/api/contact-label',{method:'PUT',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:contact.owner,recipient:contact.recipient,label:$('role-label').value,revision:contact.label_revision,color:$('label-color-value').value.trim(),color_revision:state.data.label_colors[$('role-label').value.trim()]?.revision||0})});
     contact.label=result.label;contact.label_revision=result.revision;
-    if(state.label)state.label=result.label;
     $('label-editor').close();
     await loadConversations({refreshChat:true});
   }catch(e){$('label-error').textContent=e.message;$('label-error').hidden=false;}
@@ -268,12 +314,12 @@ async function save(){
 }
 function showEditorError(message){$('editor-error').textContent=message;$('editor-error').hidden=false;}
 let searchTimer;
-$('search').addEventListener('input',()=>{state.query=$('search').value;clearSearchMatch();clearTimeout(searchTimer);++state.listRequest;listController?.abort();searchTimer=setTimeout(()=>loadConversations(),180);});
+$('search').addEventListener('input',()=>{state.query=$('search').value;$('copy-prompt').disabled=$('prompt-request').disabled=true;clearSearchMatch();clearTimeout(searchTimer);++state.listRequest;listController?.abort();searchTimer=setTimeout(()=>loadConversations(),180);});
 $('prompt-request').addEventListener('input',()=>{if(!state.current)return;const key=contactKey(state.current),value=$('prompt-request').value;if(value)requests.set(key,value);else requests.delete(key);});
 for(const [id,replies] of [['filter-all',false],['filter-replies',true]]){$(id).addEventListener('click',()=>{state.replies=replies;for(const [other,value] of [['filter-all',false],['filter-replies',true]]){$(other).classList.toggle('active',replies===value);$(other).setAttribute('aria-pressed',String(replies===value));}loadConversations();});}
 $('refresh').addEventListener('click',()=>loadConversations({refreshChat:true}));
 $('back').addEventListener('click',()=>document.querySelector('.app').classList.remove('show-chat'));
-$('filter-label').addEventListener('change',()=>{state.label=$('filter-label').value;loadConversations();});
+$('filter-label').addEventListener('change',()=>{const value=$('filter-label').value;state.unlabeled=value==='unlabeled';state.label=value.startsWith('label:')?value.slice(6):'';loadConversations();});
 $('role-tag').addEventListener('click',openLabel);
 $('new-chat').addEventListener('click',openNewChat);
 $('new-chat-form').addEventListener('submit',event=>{event.preventDefault();createChat();});
@@ -285,6 +331,13 @@ $('delete-dialog').addEventListener('cancel',event=>{event.preventDefault();clos
 $('label-form').addEventListener('submit',event=>{event.preventDefault();saveLabel();});
 $('close-label').addEventListener('click',()=>{if(!state.labelSaving)$('label-editor').close();});
 $('label-editor').addEventListener('cancel',event=>{if(state.labelSaving)event.preventDefault();});
+$('role-label').addEventListener('input',syncLabelColor);
+$('label-color-picker').addEventListener('input',()=>{$('label-color-value').value=$('label-color-picker').value;previewLabelColor();});
+$('label-color-value').addEventListener('input',()=>{const value=$('label-color-value').value;if(/^#[0-9a-f]{6}$/i.test(value))$('label-color-picker').value=value;previewLabelColor();});
+$('clear-color').addEventListener('click',()=>{$('label-color-value').value='';previewLabelColor();});
+$('previous-match').addEventListener('click',()=>moveSearchMatch(-1));
+$('next-match').addEventListener('click',()=>moveSearchMatch(1));
+$('search').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();moveSearchMatch(event.shiftKey?-1:1);}});
 $('clear-label').addEventListener('click',()=>{$('role-label').value='';saveLabel();});
 $('copy-prompt').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(buildPrompt());toast('프롬프트 복사됨');}catch{error('복사 실패 · 브라우저의 클립보드 권한을 확인하세요.');}});
 $('edit-body').addEventListener('input',markDirty);$('close-editor').addEventListener('click',closeEditor);$('save').addEventListener('click',save);

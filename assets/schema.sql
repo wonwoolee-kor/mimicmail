@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS sent_mail (
             owner TEXT NOT NULL, recipient TEXT NOT NULL, label TEXT NOT NULL,
             revision INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(owner, recipient)
         );
+        CREATE TABLE IF NOT EXISTS label_colors (
+            label TEXT PRIMARY KEY, color TEXT NOT NULL,
+            revision INTEGER NOT NULL DEFAULT 1
+        );
         CREATE TABLE IF NOT EXISTS deleted_messages (
             owner TEXT NOT NULL, message_key TEXT NOT NULL,
             PRIMARY KEY(owner, message_key)
