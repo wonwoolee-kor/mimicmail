@@ -169,6 +169,20 @@ Codex 연결은 공식 [비대화형 실행 문서](https://learn.chatgpt.com/do
 
 이 제한은 동시 작업과 입력 크기를 제어합니다. 전체 메모리에 고정된 상한을 보장하지는 않습니다. 조회용 인덱스를 처음 만들거나 무효화된 대화를 재구성할 때는 해당 대화의 전체 본문을 처리하므로 메일 수와 본문 크기에 따라 작업 메모리가 달라집니다. 반복 조회의 CPU 사용과 화면 메모리를 줄이는 대신 DB 파일 크기와 최초 인덱스 작성 비용이 늘어납니다. 작성 요청은 기존처럼 열린 페이지 메모리에만 유지하며 자동으로 삭제하지 않습니다.
 
+### 리소스 비교 재현
+
+최적화 전후의 release 실행 파일을 각각 준비한 뒤 macOS에서 실행합니다. Python 표준 라이브러리만 사용하며, 실제 DB는 읽기 전용으로 복사하고 모든 부하 요청은 임시 복사본과 합성 DB에 보냅니다. 실행 중인 서버나 원본 메일 DB를 변경하지 않습니다.
+
+```sh
+python3 scripts/benchmark_resources.py \
+  --before /path/to/before/mimicmail \
+  --after target/release/mimicmail \
+  --db data/mimicmail.sqlite3 \
+  --output /tmp/mimicmail-resources.json
+```
+
+목록·검색·대화의 첫 요청과 반복 20회 응답 시간, 요청당 서버 CPU 시간, macOS physical footprint·최대 footprint, DB 크기, 30초 유휴 사용량과 취소된 검색의 CPU 시간을 기록합니다. 긴 대화는 기존 전체 응답과 새 화면의 첫 50개 응답을 비교합니다. 브라우저 메모리는 별도로 측정하며 이 스크립트의 서버 메모리에 포함하지 않습니다.
+
 ## 검증
 
 ```sh
