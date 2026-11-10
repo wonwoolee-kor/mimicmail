@@ -5,7 +5,8 @@ const $ = id => document.getElementById(id);
 const state = {data:null, current:null, messages:[], timeline:[], reference:null, creating:false, query:'', label:'', unlabeled:false, matches:[], matchIndex:-1, matchTotal:0, page:null, chatPending:false, loadedQuery:'', listPending:false, labelSaving:false, deleting:null, deleteSaving:false, listRequest:0, chatRequest:0, editing:null, dirty:false, saving:false};
 const requests = new Map();
 const replies = new Map();
-let composerMode='request',replySaving=false;
+const sentMails = new Map();
+let composerMode='request',messageSaving=false;
 let replyEdit=null,replyEditSaving=false,renameContact=null,renameSaving=false;
 let settingsData=null,settingsSaving=false,settingsController;
 let conversationMenu=null,chatToDelete=null,chatDeleting=false;
@@ -26,15 +27,15 @@ function applyLabelColor(node,color){
 }
 function sameContact(a,b){return a&&b&&a.owner===b.owner&&a.recipient===b.recipient;}
 function contactKey(contact){return JSON.stringify([contact.owner,contact.recipient]);}
-function composerDrafts(){return composerMode==='reply'?replies:requests;}
+function composerDrafts(){return composerMode==='sent'?sentMails:composerMode==='reply'?replies:requests;}
 function syncComposer(){
-  const disabled=!state.reference||state.listPending||state.loadedQuery!==state.query||replySaving;
+  const disabled=!state.reference||state.listPending||state.loadedQuery!==state.query||messageSaving;
   $('prompt-request').disabled=$('copy-prompt').disabled=disabled;
-  $('mode-request').disabled=$('mode-reply').disabled=disabled;
-  $('save-reply').disabled=disabled||!$('prompt-request').value.trim();
-  $('copy-prompt').hidden=composerMode==='reply';$('save-reply').hidden=composerMode!=='reply';
-  $('save-reply').textContent=replySaving?'저장 중…':'답장 저장';
-  const label=composerMode==='reply'?'상대 답장 내용':'메일에 담을 내용';
+  $('mode-request').disabled=$('mode-reply').disabled=$('mode-sent').disabled=disabled;
+  $('save-message').disabled=disabled||!$('prompt-request').value.trim();
+  $('copy-prompt').hidden=composerMode!=='request';$('save-message').hidden=composerMode==='request';
+  $('save-message').textContent=messageSaving?'저장 중…':composerMode==='sent'?'메일 저장':'답장 저장';
+  const label=composerMode==='sent'?'내가 보낸 메일 내용':composerMode==='reply'?'상대 답장 내용':'메일에 담을 내용';
   $('prompt-request').placeholder=label;$('prompt-request').setAttribute('aria-label',label);
 }
 function highlight(node,term){
@@ -177,7 +178,7 @@ async function deleteChat(){
   try{
     await api('/api/conversation',{method:'DELETE',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:contact.owner,recipient:contact.recipient})});
     $('delete-chat-dialog').close();chatToDelete=null;
-    for(const drafts of [requests,replies])drafts.delete(contactKey(contact));
+    for(const drafts of [requests,replies,sentMails])drafts.delete(contactKey(contact));
     if(sameContact(contact,state.current))clearConversation();
     await loadConversations();
     (document.querySelector('.conversation-row.selected')||$('new-chat')).focus({preventScroll:true});toast('대화 삭제됨');
@@ -218,7 +219,7 @@ function renderTimeline(matches=[]){
   const page=state.page;
   if(page?.start>0)timeline.append(button('이전 메시지','text-button timeline-page',()=>openConversation(state.current,false,false,{before:page.start,revision:page.revision})));
   state.timeline.forEach((item,index)=>{
-    const day=item.kind==='received'?'':fullDate(item.sent_at);
+    const day=item.sent_at===undefined?'':fullDate(item.sent_at);
     if(day&&day!==previousDay){const divider=el('div','date-divider');divider.append(el('span','',day));timeline.append(divider);previousDay=day;}
     if(item.subject&&(item.subject!==previousTopic||matches.some(match=>match.field==='subject'&&item.keys.includes(match.key)))){const topic=el('div','topic-divider',item.subject);topic.dataset.topicIndex=index;timeline.append(topic);previousTopic=item.subject;}
     const row=el('article',`message-row${item.mine?' mine':''}`),bubble=el('div','message');
@@ -234,7 +235,7 @@ function renderTimeline(matches=[]){
     bubble.append(body,toggle);
     const meta=el('div','message-meta');
     if(item.kind==='quote')meta.append(el('span','quote-source','인용'));
-    if(item.kind!=='received')meta.append(el('time','',clockTime(item.sent_at)));
+    if(item.sent_at)meta.append(el('time','',clockTime(item.sent_at)));
     const mail=state.messages.find(mail=>mail.id===item.source_ids[0]);
     if(mail){
       const actions=[['원문 보기','document','original']];
@@ -261,18 +262,18 @@ function updateMessageToggles(){
     if(hidden&&body.classList.contains('expanded')){body.classList.remove('expanded');toggle.textContent='더 보기';toggle.setAttribute('aria-expanded','false');}
   }
 }
-async function saveReply(){
-  if($('save-reply').disabled||composerMode!=='reply')return;
-  const contact=state.current,key=contactKey(contact),body=$('prompt-request').value;
-  replySaving=true;syncComposer();error('');
+async function saveMessage(){
+  if($('save-message').disabled||composerMode==='request')return;
+  const contact=state.current,key=contactKey(contact),body=$('prompt-request').value,mode=composerMode,drafts=composerDrafts();
+  messageSaving=true;syncComposer();error('');
   try{
-    const result=await api('/api/reply',{method:'POST',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:contact.owner,recipient:contact.recipient,body})});
-    replies.delete(key);
-    if(sameContact(contact,state.current)&&composerMode==='reply')$('prompt-request').value='';
+    const result=await api(mode==='sent'?'/api/sent':'/api/reply',{method:'POST',headers:{'Content-Type':'application/json','X-Mimicmail-Token':state.data.token},body:JSON.stringify({owner:contact.owner,recipient:contact.recipient,body})});
+    drafts.delete(key);
+    if(sameContact(contact,state.current)&&composerMode===mode)$('prompt-request').value='';
     await loadConversations({refreshChat:true,reveal:{contact,key:result.key}});
     toast('저장됨');
   }catch(e){error(e.message);}
-  finally{replySaving=false;syncComposer();}
+  finally{messageSaving=false;syncComposer();if(sameContact(contact,state.current)&&!$('prompt-request').disabled&&!document.querySelector('dialog[open]'))$('prompt-request').focus({preventScroll:true});}
 }
 function openReplyEditor(item){
   replyEdit={item,contact:state.current};$('reply-edit-body').value=item.body;
@@ -418,7 +419,7 @@ function openDelete(item){
   $('delete-subject').textContent=item.subject||'(제목 없음)';
   $('delete-sender').textContent=item.sender_name||'작성자 미확인';
   $('delete-date').textContent=`${fullDate(item.sent_at)} ${clockTime(item.sent_at)}`.trim();
-  $('delete-date').hidden=$('delete-date-label').hidden=item.kind==='received';
+  $('delete-date').hidden=$('delete-date-label').hidden=item.sent_at===undefined;
   $('delete-preview').textContent=item.body.length>160?item.body.slice(0,160)+'…':item.body;
   $('delete-error').hidden=true;$('delete-dialog').showModal();$('cancel-delete').focus();
 }
@@ -487,10 +488,12 @@ async function openEditor(mail,tab){
   if(controller.signal.aborted)return;
   state.editing=mail;state.dirty=false;state.saving=false;$('tab-edit').disabled=mail.deleted;
   $('editor-subject').textContent=mail.subject||'(제목 없음)';$('editor-date').textContent=`${fullDate(mail.sent_at)} ${clockTime(mail.sent_at)}`;
+  $('editor-subject').hidden=!mail.subject;$('editor-date').hidden=mail.context.after_reply_id!==undefined;
   $('edit-body').value=mail.display_body;$('editor-error').hidden=true;$('save').disabled=true;$('save').textContent='변경 저장';
   $('edit-status').textContent='';
   $('original-body').textContent=mail.display_original;
   $('source-name').textContent=`원본 파일 · ${mail.source_name}`;
+  $('source-name').hidden=!mail.source_name;
   const forms=$('recipient-fields');forms.replaceChildren();
   mail.recipients.forEach(profile=>{const form=el('section','recipient-form');form.dataset.recipient=profile.recipient;form.append(el('h4','',mail.context.recipient_names?.[profile.recipient]||'수신자'));const fields=el('div','field-grid');fields.append(profileField('메일 목적','purpose',profile.purpose,state.data.purposes),profileField('나와의 관계','relationship',profile.relationship,state.data.relationships));form.append(fields);forms.append(form);});
   setTab(tab);$('editor').showModal();if(tab==='edit')$('edit-body').focus();
@@ -513,8 +516,8 @@ function showEditorError(message){$('editor-error').textContent=message;$('edito
 let searchTimer;
 $('search').addEventListener('input',()=>{state.query=$('search').value;syncComposer();clearSearchMatch();clearTimeout(searchTimer);++state.listRequest;listController?.abort();++state.chatRequest;chatController?.abort();state.chatPending=false;searchTimer=setTimeout(()=>loadConversations(),180);});
 $('prompt-request').addEventListener('input',()=>{if(!state.current)return;const key=contactKey(state.current),value=$('prompt-request').value;if(value)composerDrafts().set(key,value);else composerDrafts().delete(key);syncComposer();});
-for(const mode of ['request','reply'])$(`mode-${mode}`).addEventListener('change',()=>{composerMode=mode;$('prompt-request').value=state.current?composerDrafts().get(contactKey(state.current))||'':'';syncComposer();$('prompt-request').focus();});
-$('save-reply').addEventListener('click',saveReply);
+for(const mode of ['request','sent','reply'])$(`mode-${mode}`).addEventListener('change',()=>{composerMode=mode;$('prompt-request').value=state.current?composerDrafts().get(contactKey(state.current))||'':'';syncComposer();});
+$('save-message').addEventListener('click',saveMessage);
 $('reply-edit-body').addEventListener('input',()=>{$('save-reply-edit').disabled=replyEditSaving||!replyEditDirty()||!$('reply-edit-body').value.trim();});
 $('reply-edit-form').addEventListener('submit',event=>{event.preventDefault();saveReplyEdit();});
 $('cancel-reply-edit').addEventListener('click',closeReplyEditor);
@@ -569,7 +572,7 @@ $('restore-body').addEventListener('click',()=>{if(!state.editing)return;$('edit
 $('copy-body').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('panel-original').hidden?$('edit-body').value:state.editing.display_original);toast('본문 복사됨');}catch{showEditorError('복사 실패 · 본문을 선택해 직접 복사하세요.');}});
 for(const tab of ['edit','original']){$(`tab-${tab}`).addEventListener('click',()=>setTab(tab));$(`tab-${tab}`).addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?'edit':event.key==='End'?'original':tab==='edit'?'original':'edit';setTab(next);$(`tab-${next}`).focus();}});}
 document.addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'&&!document.querySelector('dialog[open]')){event.preventDefault();if(window.matchMedia('(max-width:700px)').matches)document.querySelector('.app').classList.remove('show-chat');$('search').focus();}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='s'){if($('editor').open){event.preventDefault();save();}else if($('reply-editor').open){event.preventDefault();$('reply-edit-form').requestSubmit();}else if($('rename-dialog').open){event.preventDefault();$('rename-form').requestSubmit();}}});
-window.addEventListener('beforeunload',event=>{if(state.dirty||replyEditDirty()||renameDirty()||settingsDirty()||[...requests.values(),...replies.values()].some(value=>value.trim())){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{if(state.dirty||replyEditDirty()||renameDirty()||settingsDirty()||[...requests.values(),...replies.values(),...sentMails.values()].some(value=>value.trim())){event.preventDefault();event.returnValue='';}});
 $('conversations').replaceChildren(...Array.from({length:5},()=>el('div','loading-line')));
 const messageResizeObserver=new ResizeObserver(updateMessageToggles);
 messageResizeObserver.observe($('timeline'));

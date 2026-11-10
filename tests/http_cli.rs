@@ -73,6 +73,50 @@ fn client() -> reqwest::blocking::Client {
         .unwrap()
 }
 #[test]
+fn sent_mail_can_be_saved_from_the_composer() {
+    let server = Server::start();
+    let client = client();
+    let token = server.token(&client);
+    let endpoint = format!("{}/api/sent", server.url);
+    let payload = json!({"owner":"me@example.com","recipient":"boss@example.com","body":"제가 작성한 메일입니다."});
+    assert_eq!(
+        client
+            .post(&endpoint)
+            .json(&payload)
+            .send()
+            .unwrap()
+            .status(),
+        403
+    );
+    let response = client
+        .post(&endpoint)
+        .header("X-Mimicmail-Token", &token)
+        .json(&payload)
+        .send()
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let saved: Value = response.json().unwrap();
+    let page: Value = client
+        .get(format!("{}/api/conversation", server.url))
+        .query(&[
+            ("owner", "me@example.com"),
+            ("recipient", "boss@example.com"),
+            ("compact", "1"),
+            ("limit", "1"),
+            ("key", saved["key"].as_str().unwrap()),
+        ])
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    assert_eq!(page["timeline"][0]["body"], payload["body"]);
+    assert_eq!(page["timeline"][0]["mine"], true);
+    assert_eq!(page["timeline"][0]["kind"], "sent");
+    assert_eq!(page["timeline"][0]["keys"][0], saved["key"]);
+    assert!(!page["messages"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn paged_http_keeps_full_timeline_and_rejects_stale_revisions() {
     let server = Server::start();
     let client = client();

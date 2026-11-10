@@ -10,7 +10,7 @@ use chrono::Utc;
 use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     path::Path,
 };
 use unicode_casefold::UnicodeCaseFold;
@@ -249,6 +249,29 @@ fn finish_conversation(
 ) -> Result<Value> {
     let deleted = deleted_keys(db, owner)?;
     let mut timeline = crate::context::timeline_checked(&messages, owner, &deleted, work)?;
+    // Manually entered mail follows the replies that existed when it was saved.
+    // Keep that order without inventing a sent date or changing old reply rows.
+    let positions: HashMap<_, _> = messages
+        .iter()
+        .filter_map(|m| {
+            m["context"]["after_reply_id"]
+                .as_i64()
+                .map(|after| (m["id"].as_i64().unwrap(), after))
+        })
+        .collect();
+    let mut entered = Vec::new();
+    timeline.retain_mut(|item| {
+        if item["kind"] == "sent"
+            && let Some(id) = item["source_ids"][0].as_i64()
+            && let Some(after) = positions.get(&id)
+        {
+            item.as_object_mut().unwrap().remove("sent_at");
+            entered.push((*after, id, item.clone()));
+            false
+        } else {
+            true
+        }
+    });
     let replies = db::rows(
         db,
         "SELECT * FROM received_replies WHERE owner=? AND recipient=? ORDER BY id",
@@ -276,9 +299,11 @@ fn finish_conversation(
             if deleted.contains(&key) {
                 continue;
             }
-            timeline.push(json!({"kind":"received","sender":recipient,"sender_name":name,"mine":false,"subject":"","body":reply["body"],"source_ids":[],"has_reply":true,"keys":[key]}));
+            entered.push((reply["id"].as_i64().unwrap(), 0, json!({"kind":"received","sender":recipient,"sender_name":name,"mine":false,"subject":"","body":reply["body"],"source_ids":[],"has_reply":true,"keys":[key]})));
         }
     }
+    entered.sort_by_key(|(after, id, _)| (*after, *id));
+    timeline.extend(entered.into_iter().map(|(_, _, item)| item));
     let mut result = json!({});
     result["messages"] = Value::Array(messages);
     result["timeline"] = Value::Array(timeline);
@@ -383,7 +408,7 @@ pub fn conversations_filtered(
         let latest_date = items
             .iter()
             .rev()
-            .find(|i| i["kind"] != "received")
+            .find(|i| i.get("sent_at").is_some())
             .unwrap_or(&empty);
         let label_text = label.map(|l| text(l, "label")).unwrap_or("");
         let mut reply_count = active.iter().filter(|m| m["has_reply"] == true).count();
@@ -753,6 +778,68 @@ pub fn rename_conversation(db: &Connection, payload: &Value) -> Result<Value> {
     )?;
     tx.commit()?;
     Ok(json!({"name":name}))
+}
+
+pub fn create_sent_mail(db: &Connection, payload: &Value) -> Result<Value> {
+    let owner = privacy::person_id(string(payload, "owner", "대화를 선택하세요.")?);
+    let recipient = privacy::person_id(string(payload, "recipient", "대화를 선택하세요.")?);
+    let body = string(payload, "body", "내가 보낸 메일 내용을 입력하세요.")?;
+    if body.trim().is_empty() {
+        return Err(fault(400, "내가 보낸 메일 내용을 입력하세요."));
+    }
+    let tx = immediate(db)?;
+    require_active_conversation(&tx, &owner, &recipient)?;
+    let manual = db::one(
+        &tx,
+        "SELECT name FROM manual_conversations WHERE owner=? AND recipient=?",
+        params![owner, recipient],
+    )?;
+    let data = conversation(&tx, &owner, &recipient)?;
+    let messages = array(&data, "messages");
+    if manual.is_none() && messages.is_empty() {
+        return Err(fault(
+            404,
+            "대화를 찾을 수 없습니다. 대화를 다시 선택하세요.",
+        ));
+    }
+    let name = manual
+        .as_ref()
+        .map(|c| text(c, "name"))
+        .or_else(|| {
+            messages
+                .iter()
+                .rev()
+                .find_map(|m| m["context"]["recipient_names"][&recipient].as_str())
+        })
+        .unwrap_or("상대방");
+    let label = db::one(
+        &tx,
+        "SELECT label FROM contact_labels WHERE owner=? AND recipient=?",
+        params![owner, recipient],
+    )?;
+    let role = label
+        .as_ref()
+        .map(|l| text(l, "label"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or("unknown");
+    let after_reply_id: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(id),0) FROM received_replies WHERE owner=? AND recipient=?",
+        params![owner, recipient],
+        |r| r.get(0),
+    )?;
+    let mut random = [0u8; 16];
+    getrandom::fill(&mut random).map_err(|e| anyhow::anyhow!("메일 ID 생성 실패: {e}"))?;
+    let fingerprint = crate::sha256(&random);
+    let body = privacy::redact(body);
+    let context =
+        json!({"recipient_names":{&recipient:name},"quotes":[],"after_reply_id":after_reply_id});
+    tx.execute("INSERT INTO mail_archive(owner,fingerprint,subject,sent_at,sender,to_json,cc_json,original_body,original_authored_body,source_name,context_json) VALUES (?,?,'','',?,?,'[]',?,?,'',?)",
+        params![owner, fingerprint, owner, json!([recipient]).to_string(), body, body, context.to_string()])?;
+    let id = tx.last_insert_rowid();
+    tx.execute("INSERT INTO sent_mail(owner,fingerprint,message_id,sender,recipient,role,relationship,purpose,authored_body) VALUES (?,?,?,?,?,?,'unknown','other',?)",
+        params![owner, fingerprint, format!("manual:{fingerprint}"), owner, recipient, role, body])?;
+    tx.commit()?;
+    Ok(json!({"id":id,"key":format!("sent:{fingerprint}")}))
 }
 
 fn reply_body(payload: &Value) -> Result<&str> {

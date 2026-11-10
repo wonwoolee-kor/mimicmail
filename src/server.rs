@@ -244,6 +244,7 @@ async fn handle(
             ("GET", _, Some(id)) => gui::get_mail(&db, id)?,
             ("POST", "/api/conversation", _) => gui::create_conversation(&db, &payload)?,
             ("POST", "/api/reply", _) => gui::create_reply(&db, &payload)?,
+            ("POST", "/api/sent", _) => gui::create_sent_mail(&db, &payload)?,
             ("PUT", "/api/reply", _) => gui::update_reply(&db, &payload)?,
             ("PUT", "/api/conversation", _) => gui::rename_conversation(&db, &payload)?,
             ("PUT", "/api/contact-label", _) => gui::update_contact_label(&db, &payload)?,

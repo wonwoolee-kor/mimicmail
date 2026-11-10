@@ -39,9 +39,9 @@
       <div id="chat-error" class="error-banner" role="alert" hidden></div>
       <div id="timeline" class="timeline" tabindex="0" aria-label="날짜순 메일"></div>
       <footer class="composer"><div class="composer-box">
-        <fieldset class="label-choice composer-modes"><legend class="sr-only">입력 항목</legend><div class="label-modes"><label><input id="mode-request" type="radio" name="composer-mode" value="request" checked disabled>초안 작성 요청</label><label><input id="mode-reply" type="radio" name="composer-mode" value="reply" disabled>상대 답장</label></div></fieldset>
+        <fieldset class="label-choice composer-modes"><legend class="sr-only">입력 항목</legend><div class="label-modes"><label><input id="mode-request" class="sr-only" type="radio" name="composer-mode" value="request" checked disabled>초안 요청</label><label><input id="mode-sent" class="sr-only" type="radio" name="composer-mode" value="sent" disabled>보낸 메일</label><label><input id="mode-reply" class="sr-only" type="radio" name="composer-mode" value="reply" disabled>상대 답장</label></div></fieldset>
         <textarea id="prompt-request" rows="2" aria-label="메일에 담을 내용" placeholder="메일에 담을 내용" disabled></textarea>
-        <div class="composer-actions"><button id="copy-prompt" class="primary-button" disabled><svg><use href="#copy-icon"/></svg>프롬프트 복사</button><button id="save-reply" class="primary-button" hidden disabled>답장 저장</button></div>
+        <div class="composer-actions"><button id="copy-prompt" class="primary-button" disabled><svg><use href="#copy-icon"/></svg>프롬프트 복사</button><button id="save-message" class="primary-button" hidden disabled>메일 저장</button></div>
       </div></footer>
     </section>
   </main>
