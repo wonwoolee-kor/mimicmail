@@ -210,9 +210,18 @@ struct Item {
     quote_order: usize,
 }
 pub fn timeline(messages: &[Value], owner: &str, deleted: &HashSet<String>) -> Vec<Value> {
+    timeline_checked(messages, owner, deleted, &crate::work::Work::default()).unwrap()
+}
+pub fn timeline_checked(
+    messages: &[Value],
+    owner: &str,
+    deleted: &HashSet<String>,
+    work: &crate::work::Work,
+) -> Result<Vec<Value>> {
     let mut items: Vec<Item> = Vec::new();
     let mut lookup: HashMap<(String, String), BTreeMap<i64, usize>> = HashMap::new();
     for mail in messages {
+        work.check()?;
         let normalized = readable(text(mail, "original_authored_body"))
             .chars()
             .filter(|c| !c.is_whitespace())
@@ -232,7 +241,9 @@ pub fn timeline(messages: &[Value], owner: &str, deleted: &HashSet<String>) -> V
         items.push(Item { sort_at: text(mail,"sent_at").to_owned(), quote_order: 0, value: json!({"kind":"sent","sender":owner,"sender_name":"나","mine":true,"sent_at":mail["sent_at"],"subject":topic(text(mail,"subject")),"body":mail["display_body"],"source_ids":[mail["id"]],"has_reply":mail["has_reply"],"keys":[format!("sent:{fingerprint}")]}) });
     }
     for mail in messages {
+        work.check()?;
         for (index, quote) in array(&mail["context"], "quotes").iter().rev().enumerate() {
+            work.check()?;
             let body = readable(text(quote, "body"));
             let sender = text(quote, "sender");
             let stamp = if text(quote, "sent_at").is_empty() {
@@ -297,7 +308,8 @@ pub fn timeline(messages: &[Value], owner: &str, deleted: &HashSet<String>) -> V
             b.quote_order,
         ))
     });
-    items
+    work.check()?;
+    Ok(items
         .into_iter()
         .filter(|i| {
             !array(&i.value, "keys")
@@ -305,5 +317,5 @@ pub fn timeline(messages: &[Value], owner: &str, deleted: &HashSet<String>) -> V
                 .any(|k| deleted.contains(k.as_str().unwrap_or("")))
         })
         .map(|i| i.value)
-        .collect()
+        .collect())
 }

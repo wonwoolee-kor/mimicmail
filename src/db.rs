@@ -36,6 +36,24 @@ pub fn initialize(db: &Connection) -> Result<()> {
             [],
         )?;
     }
+    if rows(db, "PRAGMA table_info(received_replies)", [])?
+        .iter()
+        .any(|r| r["name"] == "sent_at")
+    {
+        let tx =
+            rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch("ALTER TABLE received_replies DROP COLUMN sent_at;")?;
+        if exists(
+            &tx,
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='browse_meta'",
+            [],
+        )? {
+            tx.execute_batch(
+                "DELETE FROM browse_meta; DELETE FROM browse_items; DELETE FROM browse_contacts;",
+            )?;
+        }
+        tx.commit()?;
+    }
     crate::privacy::migrate(db)
 }
 pub fn row_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {

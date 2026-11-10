@@ -3,9 +3,11 @@ pub mod db;
 pub mod gui;
 pub mod llm;
 pub mod mail;
+pub mod mailbox;
 pub mod pipeline;
 pub mod privacy;
 pub mod server;
+pub mod work;
 
 use serde_json::Value;
 

@@ -58,17 +58,38 @@ pub fn search_matches(items: &[Value], query: &str) -> Vec<Value> {
     find_search_matches(items, query, usize::MAX)
 }
 fn find_search_matches(items: &[Value], query: &str, limit: usize) -> Vec<Value> {
+    find_search_matches_checked(items, query, limit, &crate::work::Work::default()).unwrap()
+}
+pub(crate) fn search_matches_checked(
+    items: &[Value],
+    query: &str,
+    work: &crate::work::Work,
+) -> Result<Vec<Value>> {
+    find_search_matches_checked(items, query, usize::MAX, work)
+}
+fn find_search_matches_checked(
+    items: &[Value],
+    query: &str,
+    limit: usize,
+    work: &crate::work::Work,
+) -> Result<Vec<Value>> {
     let query = fold(query.trim());
     if query.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let mut matches = Vec::new();
     for item in items {
+        work.check()?;
         for field in ["body", "subject"] {
             let value = text(item, field);
             let folded = fold(value);
             if !folded.contains(&query) {
                 continue;
+            }
+            let characters: Vec<_> = value.chars().collect();
+            let mut utf16 = vec![0];
+            for c in &characters {
+                utf16.push(utf16.last().unwrap() + c.len_utf16());
             }
             let mut positions = Vec::with_capacity(folded.len());
             for (index, c) in value.chars().enumerate() {
@@ -78,6 +99,7 @@ fn find_search_matches(items: &[Value], query: &str, limit: usize) -> Vec<Value>
             }
             let mut previous_end = 0;
             for (offset, _) in folded.match_indices(&query) {
+                work.check()?;
                 let start = positions[offset];
                 let end = positions[offset + query.len() - 1] + 1;
                 if start < previous_end {
@@ -85,23 +107,23 @@ fn find_search_matches(items: &[Value], query: &str, limit: usize) -> Vec<Value>
                 }
                 previous_end = end;
                 let left = start.saturating_sub(12);
-                let count = value.chars().count();
+                let count = characters.len();
                 let right = (left + 140).max(end).min(count);
                 let preview = format!(
                     "{}{}{}",
                     if left > 0 { "…" } else { "" },
-                    chars(value, left, right - left),
+                    characters[left..right].iter().collect::<String>(),
                     if right < count { "…" } else { "" }
                 );
-                matches.push(json!({"key":item["keys"][0],"field":field,"term":chars(value,start,end-start),"preview":preview,
-                "start":chars(value,0,start).encode_utf16().count(),"end":chars(value,0,end).encode_utf16().count()}));
+                matches.push(json!({"key":item["keys"][0],"field":field,"term":characters[start..end].iter().collect::<String>(),"preview":preview,
+                "start":utf16[start],"end":utf16[end]}));
                 if matches.len() == limit {
-                    return matches;
+                    return Ok(matches);
                 }
             }
         }
     }
-    matches
+    Ok(matches)
 }
 pub fn get_mail(db: &Connection, id: i64) -> Result<Value> {
     let mut item = db::one(db, "SELECT * FROM mail_archive WHERE id=?", [id])?
@@ -161,11 +183,56 @@ pub fn conversation(db: &Connection, owner: &str, recipient: &str) -> Result<Val
     let messages = ids
         .map(|id| get_mail(db, id?))
         .collect::<Result<Vec<_>>>()?;
-    let deleted = deleted_keys(db, &owner)?;
-    let mut timeline = timeline(&messages, &owner, &deleted);
+    finish_conversation(
+        db,
+        &owner,
+        &recipient,
+        messages,
+        &crate::work::Work::default(),
+    )
+}
+
+// The browsing index needs no raw originals, address arrays, or editor fields.
+// Fetch its source rows together instead of calling get_mail for every message.
+pub(crate) fn index_conversation(
+    db: &Connection,
+    owner: &str,
+    recipient: &str,
+    work: &crate::work::Work,
+) -> Result<Value> {
+    let deleted = deleted_keys(db, owner)?;
+    let mut messages = db::rows(db,
+        "SELECT a.id,a.owner,a.fingerprint,a.subject,a.sent_at,a.revision,a.original_authored_body,a.context_json,
+         (SELECT authored_body FROM sent_mail WHERE owner=a.owner AND fingerprint=a.fingerprint ORDER BY recipient LIMIT 1) AS authored_body,
+         (SELECT json_group_array(json_object('purpose',purpose)) FROM sent_mail WHERE owner=a.owner AND fingerprint=a.fingerprint) AS recipients_json
+         FROM mail_archive a JOIN sent_mail s ON a.owner=s.owner AND a.fingerprint=s.fingerprint
+         WHERE a.owner=? AND s.recipient=? ORDER BY a.sent_at,a.id", params![owner, recipient])?;
+    for mail in &mut messages {
+        work.check()?;
+        mail["context"] = serde_json::from_str(text(mail, "context_json"))?;
+        mail["recipients"] = serde_json::from_str(text(mail, "recipients_json"))?;
+        mail["display_body"] = json!(readable(text(mail, "authored_body")));
+        mail["has_reply"] = json!(has_reply(&mail["context"]));
+        mail["deleted"] = json!(deleted.contains(&format!("sent:{}", text(mail, "fingerprint"))));
+        for key in ["context_json", "recipients_json", "authored_body"] {
+            mail.as_object_mut().unwrap().remove(key);
+        }
+    }
+    finish_conversation(db, owner, recipient, messages, work)
+}
+
+fn finish_conversation(
+    db: &Connection,
+    owner: &str,
+    recipient: &str,
+    messages: Vec<Value>,
+    work: &crate::work::Work,
+) -> Result<Value> {
+    let deleted = deleted_keys(db, owner)?;
+    let mut timeline = crate::context::timeline_checked(&messages, owner, &deleted, work)?;
     let replies = db::rows(
         db,
-        "SELECT * FROM received_replies WHERE owner=? AND recipient=? ORDER BY sent_at,id",
+        "SELECT * FROM received_replies WHERE owner=? AND recipient=? ORDER BY id",
         params![owner, recipient],
     )?;
     if !replies.is_empty() {
@@ -181,26 +248,22 @@ pub fn conversation(db: &Connection, owner: &str, recipient: &str) -> Result<Val
                 messages
                     .iter()
                     .rev()
-                    .find_map(|m| m["context"]["recipient_names"][&recipient].as_str())
+                    .find_map(|m| m["context"]["recipient_names"][recipient].as_str())
             })
             .unwrap_or("상대방");
         for reply in replies {
+            work.check()?;
             let key = format!("received:{}", reply["id"]);
             if deleted.contains(&key) {
                 continue;
             }
-            let stamp = chrono::DateTime::parse_from_rfc3339(text(&reply, "sent_at"))?;
-            let index = timeline
-                .iter()
-                .position(|item| {
-                    chrono::DateTime::parse_from_rfc3339(text(item, "sent_at"))
-                        .is_ok_and(|date| date > stamp)
-                })
-                .unwrap_or(timeline.len());
-            timeline.insert(index, json!({"kind":"received","sender":recipient,"sender_name":name,"mine":false,"sent_at":reply["sent_at"],"subject":"","body":reply["body"],"source_ids":[],"has_reply":true,"keys":[key]}));
+            timeline.push(json!({"kind":"received","sender":recipient,"sender_name":name,"mine":false,"subject":"","body":reply["body"],"source_ids":[],"has_reply":true,"keys":[key]}));
         }
     }
-    Ok(json!({"messages":messages,"timeline":timeline}))
+    let mut result = json!({});
+    result["messages"] = Value::Array(messages);
+    result["timeline"] = Value::Array(timeline);
+    Ok(result)
 }
 pub fn conversations(
     db: &Connection,
@@ -295,6 +358,11 @@ pub fn conversations_filtered(
             .find(|l| l["owner"] == owner && l["recipient"] == recipient);
         let empty = json!({"sent_at":registered.map(|r| text(r,"created_at")).unwrap_or(""),"subject":"","body":""});
         let latest = items.last().unwrap_or(&empty);
+        let latest_date = items
+            .iter()
+            .rev()
+            .find(|i| i["kind"] != "received")
+            .unwrap_or(&empty);
         let label_text = label.map(|l| text(l, "label")).unwrap_or("");
         let mut reply_count = active.iter().filter(|m| m["has_reply"] == true).count();
         if reply_count == 0 {
@@ -323,7 +391,7 @@ pub fn conversations_filtered(
                         .is_some_and(|i| fold(PURPOSE_LABELS[i]).contains(&query))
                 })
             });
-        groups.push(json!({"owner":owner,"recipient":recipient,"name":if name.is_empty() {recipient.split('@').next().unwrap_or("")} else {name},"label":label_text,"label_color":colors.get(label_text).map(|c|text(c,"color")).unwrap_or(""),"label_revision":label.map(|l| l["revision"].clone()).unwrap_or(json!(0)),"count":active.len(),"registered":registered.is_some(),"reply_count":reply_count,"latest":latest["sent_at"],"subject":latest["subject"],"preview":chars(text(latest,"body"),0,140),"search_match":match_info,"matches":matches_query && (!replies || reply_count>0) && (if unlabeled {label_text.is_empty()} else {label_filter.is_empty() || label_text==label_filter})}));
+        groups.push(json!({"owner":owner,"recipient":recipient,"name":if name.is_empty() {recipient.split('@').next().unwrap_or("")} else {name},"label":label_text,"label_color":colors.get(label_text).map(|c|text(c,"color")).unwrap_or(""),"label_revision":label.map(|l| l["revision"].clone()).unwrap_or(json!(0)),"count":active.len(),"registered":registered.is_some(),"reply_count":reply_count,"latest":latest_date["sent_at"],"subject":latest["subject"],"preview":chars(text(latest,"body"),0,140),"search_match":match_info,"matches":matches_query && (!replies || reply_count>0) && (if unlabeled {label_text.is_empty()} else {label_filter.is_empty() || label_text==label_filter})}));
     }
     groups.sort_by_key(|g| {
         std::cmp::Reverse(
@@ -571,13 +639,62 @@ pub fn create_conversation(db: &Connection, payload: &Value) -> Result<Value> {
         .ok_or_else(|| fault(404, "대화를 찾을 수 없습니다."))?;
     Ok(json!({"contact":contact,"created":true}))
 }
-pub fn create_reply(db: &Connection, payload: &Value) -> Result<Value> {
-    let owner = string(payload, "owner", "대화를 선택하세요.")?;
-    let recipient = string(payload, "recipient", "대화를 선택하세요.")?;
+pub fn rename_conversation(db: &Connection, payload: &Value) -> Result<Value> {
+    let owner = privacy::person_id(string(payload, "owner", "대화를 선택하세요.")?);
+    let recipient = privacy::person_id(string(payload, "recipient", "대화를 선택하세요.")?);
+    let name = string(payload, "name", "이름을 입력하세요.")?.trim();
+    if name.is_empty() || name.chars().count() > 100 {
+        return Err(fault(400, "이름은 1~100자로 입력하세요."));
+    }
+    let name = privacy::redact(name);
+    let original = string(
+        payload,
+        "original_name",
+        "대화를 다시 열어 이름을 수정하세요.",
+    )?;
+    let tx = immediate(db)?;
+    let current = db::one(
+        &tx,
+        "SELECT name FROM manual_conversations WHERE owner=? AND recipient=?",
+        params![owner, recipient],
+    )?
+    .ok_or_else(|| fault(404, "직접 만든 대화를 선택하세요."))?;
+    if current["name"] != original {
+        return Err(fault(
+            409,
+            "다른 창에서 이름이 변경되었습니다. 대화를 다시 열어 수정하세요.",
+        ));
+    }
+    let contacts = conversations(&tx, "", false, "")?;
+    if array(&contacts, "items")
+        .iter()
+        .any(|c| c["owner"] == owner && c["recipient"] != recipient && c["name"] == name)
+    {
+        return Err(fault(
+            409,
+            "같은 이름의 대화가 있습니다. 다른 이름을 입력하세요.",
+        ));
+    }
+    tx.execute(
+        "UPDATE manual_conversations SET name=? WHERE owner=? AND recipient=?",
+        params![name, owner, recipient],
+    )?;
+    tx.commit()?;
+    Ok(json!({"name":name}))
+}
+
+fn reply_body(payload: &Value) -> Result<&str> {
     let body = string(payload, "body", "상대 답장을 입력하세요.")?;
     if body.trim().is_empty() {
         return Err(fault(400, "상대 답장을 입력하세요."));
     }
+    Ok(body)
+}
+
+pub fn create_reply(db: &Connection, payload: &Value) -> Result<Value> {
+    let owner = string(payload, "owner", "대화를 선택하세요.")?;
+    let recipient = string(payload, "recipient", "대화를 선택하세요.")?;
+    let body = reply_body(payload)?;
     let owner = privacy::person_id(owner);
     let recipient = privacy::person_id(recipient);
     let tx = immediate(db)?;
@@ -592,15 +709,44 @@ pub fn create_reply(db: &Connection, payload: &Value) -> Result<Value> {
         ));
     }
     tx.execute(
-        "INSERT INTO received_replies(owner,recipient,body,sent_at) VALUES (?,?,?,?)",
-        params![
-            owner,
-            recipient,
-            privacy::redact(body),
-            Utc::now().to_rfc3339()
-        ],
+        "INSERT INTO received_replies(owner,recipient,body) VALUES (?,?,?)",
+        params![owner, recipient, privacy::redact(body)],
     )?;
     let key = format!("received:{}", tx.last_insert_rowid());
+    tx.commit()?;
+    Ok(json!({"key":key}))
+}
+
+pub fn update_reply(db: &Connection, payload: &Value) -> Result<Value> {
+    let owner = privacy::person_id(string(payload, "owner", "대화를 선택하세요.")?);
+    let recipient = privacy::person_id(string(payload, "recipient", "대화를 선택하세요.")?);
+    let key = string(payload, "key", "수정할 답장을 선택하세요.")?;
+    let id = key
+        .strip_prefix("received:")
+        .and_then(|id| id.parse::<i64>().ok())
+        .ok_or_else(|| fault(400, "수정할 답장을 선택하세요."))?;
+    let original_body = string(payload, "original_body", "답장을 다시 열어 수정하세요.")?;
+    let body = reply_body(payload)?;
+    let tx = immediate(db)?;
+    let current = db::one(
+        &tx,
+        "SELECT body FROM received_replies WHERE id=? AND owner=? AND recipient=?",
+        params![id, owner, recipient],
+    )?
+    .ok_or_else(|| fault(404, "답장을 찾을 수 없습니다. 대화를 다시 여세요."))?;
+    if deleted_keys(&tx, &owner)?.contains(key) {
+        return Err(fault(404, "삭제된 답장입니다. 대화를 다시 여세요."));
+    }
+    if current["body"] != original_body {
+        return Err(fault(
+            409,
+            "다른 창에서 답장이 변경되었습니다. 답장을 다시 열어 수정하세요.",
+        ));
+    }
+    tx.execute(
+        "UPDATE received_replies SET body=? WHERE id=? AND owner=? AND recipient=?",
+        params![privacy::redact(body), id, owner, recipient],
+    )?;
     tx.commit()?;
     Ok(json!({"key":key}))
 }

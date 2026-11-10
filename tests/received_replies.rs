@@ -24,7 +24,7 @@ fn replies_persist_as_searchable_facts_without_changing_sent_style() {
     assert_eq!(reply["sender"], privacy::person_id("boss@example.com"));
     assert_eq!(reply["sender_name"], "팀장");
     assert_eq!(reply["body"], "검토완료\n문의: [이메일 삭제됨]");
-    assert!(chrono::DateTime::parse_from_rfc3339(text(reply, "sent_at")).is_ok());
+    assert!(reply.get("sent_at").is_none());
     assert!(array(reply, "source_ids").is_empty());
     let list = gui::conversations(&db, "검토완료", true, "").unwrap();
     assert_eq!(array(&list, "items").len(), 1);
@@ -151,4 +151,132 @@ fn reply_validation_rejects_empty_bodies_and_unknown_conversations() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn replies_edit_without_reviving_deleted_or_overwriting_stale_data() {
+    let db = populated();
+    let payload =
+        json!({"owner":"me@example.com","recipient":"boss@example.com","body":"처음 답장"});
+    let saved = gui::create_reply(&db, &payload).unwrap();
+    let data = gui::conversation(&db, "me@example.com", "boss@example.com").unwrap();
+    let reply = array(&data, "timeline")
+        .iter()
+        .find(|i| i["keys"][0] == saved["key"])
+        .unwrap();
+    assert!(reply.get("sent_at").is_none());
+    let mut edit = json!({"owner":"me@example.com","recipient":"boss@example.com","key":saved["key"],"body":"수정 답장 boss@example.com","original_body":reply["body"]});
+    for field in ["owner", "recipient"] {
+        let mut wrong = edit.clone();
+        wrong[field] = json!("someone@example.com");
+        assert!(gui::update_reply(&db, &wrong).is_err());
+    }
+    gui::update_reply(&db, &edit).unwrap();
+    assert!(
+        gui::update_reply(&db, &edit).is_err(),
+        "stale edit must fail"
+    );
+    let data = gui::conversation(&db, "me@example.com", "boss@example.com").unwrap();
+    let reply = array(&data, "timeline")
+        .iter()
+        .find(|i| i["keys"][0] == saved["key"])
+        .unwrap();
+    assert_eq!(reply["body"], "수정 답장 [이메일 삭제됨]");
+    assert!(reply.get("sent_at").is_none());
+    edit["original_body"] = reply["body"].clone();
+    gui::delete_message(&db, &edit).unwrap();
+    assert!(gui::update_reply(&db, &edit).is_err());
+}
+
+#[test]
+fn manual_conversation_rename_preserves_identity_replies_and_label() {
+    let db = populated();
+    let created = gui::create_conversation(
+        &db,
+        &json!({"owner":"me@example.com","name":"이름 오타","label":"교수"}),
+    )
+    .unwrap();
+    let recipient = &created["contact"]["recipient"];
+    gui::create_reply(
+        &db,
+        &json!({"owner":"me@example.com","recipient":recipient,"body":"답장"}),
+    )
+    .unwrap();
+    let mut edit = json!({"owner":"me@example.com","recipient":recipient,"original_name":"이름 오타","name":"고친 이름"});
+    gui::rename_conversation(&db, &edit).unwrap();
+    assert!(gui::rename_conversation(&db, &edit).is_err());
+    let list = gui::conversations(&db, "고친 이름", false, "교수").unwrap();
+    assert_eq!(list["items"][0]["recipient"], *recipient);
+    assert_eq!(list["items"][0]["reply_count"], 1);
+    let data = gui::conversation(&db, "me@example.com", recipient.as_str().unwrap()).unwrap();
+    assert_eq!(data["timeline"][0]["sender_name"], "고친 이름");
+    edit["original_name"] = json!("고친 이름");
+    gui::create_conversation(&db, &json!({"owner":"me@example.com","name":"다른 사람"})).unwrap();
+    for name in [" ", "다른 사람"] {
+        edit["name"] = json!(name);
+        assert!(gui::rename_conversation(&db, &edit).is_err());
+    }
+    edit["name"] = json!("변경");
+    edit["owner"] = json!("other@example.com");
+    assert!(gui::rename_conversation(&db, &edit).is_err());
+    edit["owner"] = json!("me@example.com");
+    edit["recipient"] = json!("boss@example.com");
+    assert!(gui::rename_conversation(&db, &edit).is_err());
+}
+
+#[test]
+fn migration_removes_reply_timestamps_and_cached_copies_preserving_messages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("mail.sqlite3");
+    let db = db::connect(&path).unwrap();
+    load_tables(&db, &legacy()["tables"]);
+    let saved = gui::create_reply(
+        &db,
+        &json!({"owner":"me@example.com","recipient":"boss@example.com","body":"보존할 답장"}),
+    )
+    .unwrap();
+    let before = gui::conversation(&db, "me@example.com", "boss@example.com").unwrap();
+    db.execute_batch("ALTER TABLE received_replies ADD COLUMN sent_at TEXT NOT NULL DEFAULT '2026-11-03T09:30:00+09:00';").unwrap();
+    mimicmail::mailbox::initialize(&db).unwrap();
+    let work = mimicmail::work::Work::default();
+    mimicmail::mailbox::read(&db, &work, |db| {
+        mimicmail::mailbox::conversations(db, "", false, "", false, &work)
+    })
+    .unwrap();
+    db.execute_batch("UPDATE browse_items SET item=json_set(item,'$.sent_at','2026-11-03T09:30:00+09:00') WHERE json_extract(item,'$.kind')='received';").unwrap();
+    drop(db);
+    let db = db::connect(&path).unwrap();
+    assert!(
+        !db::rows(&db, "PRAGMA table_info(received_replies)", [])
+            .unwrap()
+            .iter()
+            .any(|r| r["name"] == "sent_at")
+    );
+    assert!(
+        db::rows(&db, "SELECT * FROM browse_items", [])
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        gui::conversation(&db, "me@example.com", "boss@example.com").unwrap(),
+        before
+    );
+    mimicmail::mailbox::initialize(&db).unwrap();
+    let selected = mimicmail::mailbox::read(&db, &work, |db| {
+        mimicmail::mailbox::conversation_page(
+            db,
+            "me@example.com",
+            "boss@example.com",
+            "",
+            mimicmail::mailbox::Page {
+                limit: 1,
+                message_key: Some(text(&saved, "key").to_owned()),
+                ..Default::default()
+            },
+            &work,
+        )
+    })
+    .unwrap();
+    assert!(selected["timeline"][0].get("sent_at").is_none());
+    assert_eq!(selected["timeline"][0]["body"], "보존할 답장");
 }

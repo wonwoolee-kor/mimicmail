@@ -1,4 +1,7 @@
-use crate::{Fault, db, gui, pipeline};
+use crate::{
+    Fault, db, gui, mailbox, pipeline,
+    work::{CancelOnDrop, Work},
+};
 use anyhow::Result;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
@@ -143,28 +146,40 @@ async fn handle(
             _ => return Ok(error(400, "저장 요청 형식이 올바르지 않습니다.")),
         };
     }
-    let permit = match state.jobs.clone().try_acquire_owned() {
-        Ok(p) => p,
-        Err(_) => return Ok(error(503, "요청 처리 중입니다. 잠시 후 다시 시도하세요.")),
+    let permit = match tokio::time::timeout(
+        Duration::from_millis(500),
+        state.jobs.clone().acquire_owned(),
+    )
+    .await
+    {
+        Ok(Ok(p)) => p,
+        _ => return Ok(error(503, "요청 처리 중입니다. 잠시 후 다시 시도하세요.")),
     };
+    let work = Work::until(Instant::now() + Duration::from_secs(10));
+    // Hyper drops the service future on disconnect. The blocking worker must
+    // observe that cancellation itself; dropping its JoinHandle is not enough.
+    let _cancel = CancelOnDrop(work.clone());
     let result = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
         let _permit = permit;
         let db = db::open(&state.path, false)?;
-        let deadline = Instant::now() + Duration::from_secs(10);
-        db.progress_handler(1000, Some(move || Instant::now() > deadline));
-        let arg = |key| query.get(key).map(String::as_str).unwrap_or("");
+        let sql_work = work.clone();
+        db.progress_handler(1000, Some(move || sql_work.check().is_err()));
+        let arg = |key: &str| query.get(key).map(String::as_str).unwrap_or("");
         let id = path
             .strip_prefix("/api/mail/")
             .and_then(|s| s.parse::<i64>().ok());
         let result = match (method.as_str(), path.as_str(), id) {
             ("GET", "/api/conversations", _) => {
-                let mut result = gui::conversations_filtered(
-                    &db,
-                    arg("q"),
-                    arg("replies") == "1",
-                    arg("label"),
-                    arg("unlabeled") == "1",
-                )?;
+                let mut result = mailbox::read(&db, &work, |db| {
+                    mailbox::conversations(
+                        db,
+                        arg("q"),
+                        arg("replies") == "1",
+                        arg("label"),
+                        arg("unlabeled") == "1",
+                        &work,
+                    )
+                })?;
                 result["token"] = json!(state.token);
                 result["purposes"] = gui::labels(&pipeline::PURPOSES, &gui::PURPOSE_LABELS);
                 result["relationships"] =
@@ -172,6 +187,43 @@ async fn handle(
                 result
             }
             ("GET", "/api/conversation", _) => {
+                if arg("compact") == "1" && !arg("limit").is_empty() {
+                    let number = |key: &str| -> Result<Option<usize>> {
+                        if arg(key).is_empty() {
+                            Ok(None)
+                        } else {
+                            Ok(Some(arg(key).parse().map_err(|_| {
+                                crate::fault(400, "페이지 정보가 올바르지 않습니다.")
+                            })?))
+                        }
+                    };
+                    let page = mailbox::Page {
+                        before: number("before")?,
+                        limit: number("limit")?.unwrap_or(50),
+                        match_index: number("match")?,
+                        message_key: (!arg("key").is_empty()).then(|| arg("key").to_owned()),
+                        revision: if arg("revision").is_empty() {
+                            None
+                        } else {
+                            Some(arg("revision").parse().map_err(|_| {
+                                crate::fault(400, "페이지 정보가 올바르지 않습니다.")
+                            })?)
+                        },
+                    };
+                    let mut result = mailbox::read(&db, &work, |db| {
+                        mailbox::conversation_page(
+                            db,
+                            arg("owner"),
+                            arg("recipient"),
+                            arg("q"),
+                            page,
+                            &work,
+                        )
+                    })?;
+                    result["prompt_reference"] =
+                        gui::prompt_reference(&state.path, arg("owner"), arg("recipient"))?;
+                    return Ok(serde_json::to_vec(&result)?);
+                }
                 let mut result = gui::conversation(&db, arg("owner"), arg("recipient"))?;
                 result["search_matches"] = json!(gui::search_matches(
                     crate::array(&result, "timeline"),
@@ -190,6 +242,8 @@ async fn handle(
             ("GET", _, Some(id)) => gui::get_mail(&db, id)?,
             ("POST", "/api/conversation", _) => gui::create_conversation(&db, &payload)?,
             ("POST", "/api/reply", _) => gui::create_reply(&db, &payload)?,
+            ("PUT", "/api/reply", _) => gui::update_reply(&db, &payload)?,
+            ("PUT", "/api/conversation", _) => gui::rename_conversation(&db, &payload)?,
             ("PUT", "/api/contact-label", _) => gui::update_contact_label(&db, &payload)?,
             ("PUT", _, Some(id)) => gui::update_mail(&db, id, &payload)?,
             ("DELETE", "/api/message", _) => gui::delete_message(&db, &payload)?,
@@ -216,7 +270,7 @@ async fn handle(
     })
 }
 pub fn serve(path: &Path, port: u16, open_browser: bool) -> Result<()> {
-    drop(db::connect(path)?);
+    mailbox::initialize(&db::connect(path)?)?;
     let path = std::path::absolute(path)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .max_blocking_threads(MAX_DB_JOBS)

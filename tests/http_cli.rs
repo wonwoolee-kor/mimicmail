@@ -73,6 +73,148 @@ fn client() -> reqwest::blocking::Client {
         .unwrap()
 }
 #[test]
+fn paged_http_keeps_full_timeline_and_rejects_stale_revisions() {
+    let server = Server::start();
+    let client = client();
+    let endpoint = format!("{}/api/conversation", server.url);
+    let contact = [
+        ("owner", "me@example.com"),
+        ("recipient", "boss@example.com"),
+    ];
+    let full = client
+        .get(&endpoint)
+        .query(&contact)
+        .send()
+        .unwrap()
+        .json::<Value>()
+        .unwrap();
+    let mut before = None;
+    let mut combined = Vec::new();
+    let revision = loop {
+        let mut request = client
+            .get(&endpoint)
+            .query(&contact)
+            .query(&[("compact", "1"), ("limit", "1")]);
+        if let Some(before) = before {
+            request = request.query(&[("before", before)]);
+        }
+        let page = request.send().unwrap().json::<Value>().unwrap();
+        let mut items = page["timeline"].as_array().unwrap().clone();
+        assert!(items.len() <= 1);
+        items.extend(combined);
+        combined = items;
+        let start = page["page"]["start"].as_u64().unwrap();
+        if start == 0 {
+            break page["page"]["revision"].clone();
+        }
+        before = Some(start);
+    };
+    assert_eq!(json!(combined), full["timeline"]);
+    let token = server.token(&client);
+    let source = &full["messages"][0];
+    assert_eq!(client.put(format!("{}/api/mail/{}",server.url,source["id"])).header("X-Mimicmail-Token",token)
+        .json(&json!({"revision":source["revision"],"authored_body":"페이지 수정 검증","recipients":source["recipients"]})).send().unwrap().status(),200);
+    assert_eq!(
+        client
+            .get(&endpoint)
+            .query(&contact)
+            .query(&[
+                ("compact", "1"),
+                ("limit", "1"),
+                ("revision", &revision.to_string())
+            ])
+            .send()
+            .unwrap()
+            .status(),
+        409
+    );
+    assert_eq!(
+        client
+            .get(&endpoint)
+            .query(&contact)
+            .query(&[("compact", "1"), ("limit", "-1")])
+            .send()
+            .unwrap()
+            .status(),
+        400
+    );
+}
+#[test]
+fn http_reply_edit_and_conversation_rename_persist_and_reveal_saved_message() {
+    let server = Server::start();
+    let client = client();
+    let token = server.token(&client);
+    let created: Value = client
+        .post(format!("{}/api/conversation", server.url))
+        .header("X-Mimicmail-Token", &token)
+        .json(&json!({"owner":"me@example.com","name":"오타"}))
+        .send()
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .unwrap();
+    let recipient = &created["contact"]["recipient"];
+    let payload = json!({"owner":"me@example.com","recipient":recipient,"body":"처음 답장"});
+    let saved: Value = client
+        .post(format!("{}/api/reply", server.url))
+        .header("X-Mimicmail-Token", &token)
+        .json(&payload)
+        .send()
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .unwrap();
+    let edit = json!({"owner":"me@example.com","recipient":recipient,"key":saved["key"],"body":"바꾼 답장","original_body":"처음 답장"});
+    assert_eq!(
+        client
+            .put(format!("{}/api/reply", server.url))
+            .json(&edit)
+            .send()
+            .unwrap()
+            .status(),
+        403
+    );
+    client
+        .put(format!("{}/api/reply", server.url))
+        .header("X-Mimicmail-Token", &token)
+        .json(&edit)
+        .send()
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    client.put(format!("{}/api/conversation", server.url)).header("X-Mimicmail-Token", &token)
+        .json(&json!({"owner":"me@example.com","recipient":recipient,"name":"수정된 이름","original_name":"오타"}))
+        .send().unwrap().error_for_status().unwrap();
+    let result: Value = client
+        .get(format!("{}/api/conversation", server.url))
+        .query(&[
+            ("owner", "me@example.com"),
+            ("recipient", recipient.as_str().unwrap()),
+            ("compact", "1"),
+            ("limit", "1"),
+            ("before", "0"),
+            ("key", saved["key"].as_str().unwrap()),
+        ])
+        .send()
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .unwrap();
+    assert_eq!(result["timeline"][0]["body"], "바꾼 답장");
+    assert_eq!(result["timeline"][0]["sender_name"], "수정된 이름");
+    assert!(result["timeline"][0].get("sent_at").is_none());
+    let db = db::open(&server.dbpath(), true).unwrap();
+    assert!(
+        !db::rows(&db, "PRAGMA table_info(received_replies)", [])
+            .unwrap()
+            .iter()
+            .any(|r| r["name"] == "sent_at")
+    );
+}
+#[test]
 fn http_static_assets_host_origin_token_and_edit_conflict() {
     let server = Server::start();
     let client = client();

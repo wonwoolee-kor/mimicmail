@@ -48,3 +48,9 @@ test('a lost response is not retried because the write may have succeeded',async
   await assert.rejects(api('/api/reply',{method:'POST'}),/Failed to fetch/);
   assert.equal(fetch.mock.callCount(),1);
 });
+
+test('page conflicts retain their HTTP status for refreshing the conversation',async t => {
+  const calls=responses(t,[[409,{error:'대화 내용이 변경되었습니다.'}]]);
+  await assert.rejects(api('/api/conversation?limit=50&revision=1'),error=>error.status===409&&error.message.includes('대화 내용'));
+  assert.equal(calls.length,1);
+});

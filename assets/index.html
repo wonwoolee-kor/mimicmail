@@ -31,7 +31,7 @@
       <header class="chat-header">
         <button id="back" class="icon-button mobile-back" aria-label="대화 목록으로"><svg><use href="#back-icon"/></svg></button>
         <div id="contact-avatar" class="avatar header-avatar">m</div>
-        <div class="contact-heading"><h2 id="contact-name">대화</h2></div>
+        <div class="contact-heading"><h2 id="contact-name">대화</h2><button id="rename-contact" class="icon-button" aria-label="이름 수정" hidden><svg><use href="#edit-icon"/></svg></button></div>
         <button id="role-tag" class="role-tag" disabled>직급 지정</button>
       </header>
       <div id="search-navigation" class="search-navigation" hidden><span id="search-position" role="status" aria-live="polite"></span><button id="previous-match" class="text-button" aria-label="이전 검색 결과">이전</button><button id="next-match" class="text-button" aria-label="다음 검색 결과">다음</button></div>
@@ -56,6 +56,22 @@
       </fieldset>
       <p id="new-chat-error" class="editor-error" role="alert" hidden></p>
       <footer class="label-footer"><button id="cancel-new-chat" type="button" class="text-button">취소</button><button id="create-chat" type="submit" class="primary-button">대화 시작</button></footer>
+    </form>
+  </dialog>
+  <dialog id="rename-dialog" class="label-dialog" aria-labelledby="rename-heading">
+    <div class="editor-heading"><h2 id="rename-heading">이름 수정</h2></div>
+    <form id="rename-form">
+      <label class="field">이름<input id="rename-name" maxlength="100" required autocomplete="off"></label>
+      <p id="rename-error" class="editor-error" role="alert" hidden></p>
+      <footer class="label-footer"><button id="cancel-rename" type="button" class="text-button">취소</button><button id="save-name" type="submit" class="primary-button">저장</button></footer>
+    </form>
+  </dialog>
+  <dialog id="reply-editor" class="label-dialog reply-dialog" aria-labelledby="reply-heading">
+    <div class="editor-heading"><h2 id="reply-heading">답장 수정</h2></div>
+    <form id="reply-edit-form">
+      <label class="field">상대 답장 내용<textarea id="reply-edit-body" required></textarea></label>
+      <p id="reply-edit-error" class="editor-error" role="alert" hidden></p>
+      <footer class="label-footer"><button id="cancel-reply-edit" type="button" class="text-button">취소</button><button id="save-reply-edit" type="submit" class="primary-button">저장</button></footer>
     </form>
   </dialog>
   <dialog id="editor" aria-labelledby="editor-heading">
@@ -96,7 +112,7 @@
     <div class="editor-heading"><h2 id="delete-heading">정말 삭제하시겠습니까?</h2></div>
     <div class="delete-content">
       <p id="delete-description">대화와 문체 참조에서 삭제됩니다. 보관 원문은 유지됩니다.</p>
-      <dl class="delete-details"><dt>제목</dt><dd id="delete-subject"></dd><dt>발신자</dt><dd id="delete-sender"></dd><dt>발신 시각</dt><dd id="delete-date"></dd></dl>
+      <dl class="delete-details"><dt>제목</dt><dd id="delete-subject"></dd><dt>발신자</dt><dd id="delete-sender"></dd><dt id="delete-date-label">발신 시각</dt><dd id="delete-date"></dd></dl>
       <p id="delete-preview"></p>
       <p id="delete-error" class="editor-error" role="alert" hidden></p>
       <footer class="label-footer"><button id="cancel-delete" class="text-button" autofocus>취소</button><button id="confirm-delete" class="primary-button danger-button">메시지 삭제</button></footer>

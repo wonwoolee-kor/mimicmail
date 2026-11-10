@@ -8,6 +8,10 @@ export async function api(path, options={}, retry=true) {
     headers.set('X-Mimicmail-Token',session.token);
     return api(path,{...options,headers},false);
   }
-  if (!response.ok) throw new Error(data.error||'요청을 완료하지 못했습니다.');
+  if (!response.ok) {
+    const error = new Error(data.error||'요청을 완료하지 못했습니다.');
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
