@@ -321,7 +321,7 @@ async function saveName(){
 function buildPrompt(){
   const {database_path}=state.reference;
   const database=database_path==='data/mimicmail.sqlite3'?'':`\nDB: ${database_path}`;
-  const request=$('prompt-request').value.trim()||'작성 목적을 먼저 확인해 주세요.';
+  const request=$('prompt-request').value.trim();
   return `README의 context 조회 방법으로 필요한 대화와 내 문체를 참고해 이메일 제목·본문을 이 채팅에 작성해 주세요.
 대화: ${state.current.name}${database}
 owner=${state.current.owner}, recipient=${state.current.recipient}
