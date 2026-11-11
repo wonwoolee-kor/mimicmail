@@ -249,8 +249,7 @@ fn finish_conversation(
 ) -> Result<Value> {
     let deleted = deleted_keys(db, owner)?;
     let mut timeline = crate::context::timeline_checked(&messages, owner, &deleted, work)?;
-    // Manually entered mail follows the replies that existed when it was saved.
-    // Keep that order without inventing a sent date or changing old reply rows.
+    // Order manual mail by reply ID; it has no sent date.
     let positions: HashMap<_, _> = messages
         .iter()
         .filter_map(|m| {
@@ -471,7 +470,7 @@ fn immediate(db: &Connection) -> Result<Transaction<'_>> {
     )?)
 }
 pub fn general_context(db: &Connection) -> Result<Value> {
-    // The read-only context command must also work before an older DB is migrated.
+    // Read-only access may precede migration.
     if db::exists(
         db,
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='general_context'",
@@ -920,21 +919,24 @@ pub fn delete_conversation(db: &Connection, payload: &Value) -> Result<Value> {
     let owner = privacy::person_id(owner);
     let recipient = privacy::person_id(recipient);
     let tx = immediate(db)?;
-    if !db::exists(
-        &tx,
-        "SELECT 1 FROM sent_mail WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM manual_conversations WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM received_replies WHERE owner=?1 AND recipient=?2",
-        params![owner, recipient],
-    )? {
+    if !conversation_deleted(&tx, &owner, &recipient)?
+        && !db::exists(
+            &tx,
+            "SELECT 1 FROM sent_mail WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM manual_conversations WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM received_replies WHERE owner=?1 AND recipient=?2",
+            params![owner, recipient],
+        )?
+    {
         return Err(fault(
             404,
             "대화를 찾을 수 없습니다. 대화 목록을 새로고침하세요.",
         ));
     }
-    // Scope the tombstone to one contact so shared sent mail remains in other chats.
+    // Keep only the contact ID to prevent reimporting deleted content.
     tx.execute(
         "INSERT OR IGNORE INTO deleted_messages(owner,message_key) VALUES (?,?)",
         params![owner, format!("conversation:{recipient}")],
     )?;
+    db::purge_conversation(&tx, &owner, &recipient)?;
     tx.commit()?;
     Ok(json!({"deleted":true}))
 }

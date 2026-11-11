@@ -746,6 +746,14 @@ fn http_chat_delete_requires_token_and_removes_the_cached_conversation() {
         db::rows(&db, "SELECT id FROM mail_archive", [])
             .unwrap()
             .len(),
-        2
+        1
+    );
+    assert_eq!(
+        client
+            .get(format!("{}/api/mail/1", server.url))
+            .send()
+            .unwrap()
+            .status(),
+        404
     );
 }

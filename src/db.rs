@@ -1,5 +1,7 @@
 use anyhow::Result;
-use rusqlite::{Connection, OpenFlags, Params, types::ValueRef};
+use rusqlite::{
+    Connection, OpenFlags, Params, Transaction, TransactionBehavior, params, types::ValueRef,
+};
 use serde_json::{Map, Value};
 use std::{path::Path, time::Duration};
 
@@ -54,7 +56,104 @@ pub fn initialize(db: &Connection) -> Result<()> {
         }
         tx.commit()?;
     }
-    crate::privacy::migrate(db)
+    crate::privacy::migrate(db)?;
+    preserve_mail_ids(db)?;
+    let tx = Transaction::new_unchecked(db, TransactionBehavior::Immediate)?;
+    for deleted in rows(
+        &tx,
+        "SELECT owner,substr(message_key,14) AS recipient FROM deleted_messages WHERE message_key LIKE 'conversation:%'",
+        [],
+    )? {
+        purge_conversation(
+            &tx,
+            crate::text(&deleted, "owner"),
+            crate::text(&deleted, "recipient"),
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+// Physical deletion must not recycle IDs that an older editor or deletion key still uses.
+fn preserve_mail_ids(db: &Connection) -> Result<()> {
+    let tables = rows(
+        db,
+        "SELECT name,sql FROM sqlite_master WHERE type='table' AND name IN ('mail_archive','received_replies') AND instr(upper(sql),'AUTOINCREMENT')=0",
+        [],
+    )?;
+    if tables.is_empty() {
+        return Ok(());
+    }
+    let tx = Transaction::new_unchecked(db, TransactionBehavior::Immediate)?;
+    let cached = exists(
+        &tx,
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='browse_meta'",
+        [],
+    )?;
+    for trigger in rows(
+        &tx,
+        "SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'browse_*'",
+        [],
+    )? {
+        tx.execute_batch(&format!(
+            "DROP TRIGGER \"{}\"",
+            crate::text(&trigger, "name").replace('"', "\"\"")
+        ))?;
+    }
+    for table in tables {
+        let name = crate::text(&table, "name");
+        let sql = crate::text(&table, "sql");
+        let definition = sql[sql.find('(').unwrap()..].replacen(
+            "INTEGER PRIMARY KEY",
+            "INTEGER PRIMARY KEY AUTOINCREMENT",
+            1,
+        );
+        tx.execute_batch(&format!("CREATE TABLE {name}_monotonic {definition}; INSERT INTO {name}_monotonic SELECT * FROM {name}; DROP TABLE {name}; ALTER TABLE {name}_monotonic RENAME TO {name};"))?;
+    }
+    tx.execute_batch(include_str!("../assets/schema.sql"))?;
+    if cached {
+        tx.execute("DELETE FROM browse_meta", [])?;
+    }
+    tx.commit()?;
+    if cached {
+        crate::mailbox::initialize(db)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn purge_conversation(db: &Connection, owner: &str, recipient: &str) -> Result<()> {
+    let mail = rows(
+        db,
+        "SELECT fingerprint FROM sent_mail WHERE owner=? AND recipient=?",
+        params![owner, recipient],
+    )?;
+    for table in [
+        "sent_mail",
+        "received_replies",
+        "contact_labels",
+        "manual_conversations",
+    ] {
+        db.execute(
+            &format!("DELETE FROM {table} WHERE owner=? AND recipient=?"),
+            params![owner, recipient],
+        )?;
+    }
+    for item in mail {
+        db.execute("DELETE FROM mail_archive WHERE owner=?1 AND fingerprint=?2 AND NOT EXISTS (SELECT 1 FROM sent_mail WHERE owner=?1 AND fingerprint=?2)", params![owner,crate::text(&item,"fingerprint")])?;
+    }
+    if exists(
+        db,
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='browse_meta'",
+        [],
+    )? {
+        for table in ["browse_items", "browse_contacts", "browse_dirty"] {
+            db.execute(
+                &format!("DELETE FROM {table} WHERE owner=? AND recipient=?"),
+                params![owner, recipient],
+            )?;
+        }
+    }
+    Ok(())
 }
 pub fn row_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let mut result = Map::new();

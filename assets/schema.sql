@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS sent_mail (
         CREATE INDEX IF NOT EXISTS mail_role ON sent_mail(owner, role);
         CREATE INDEX IF NOT EXISTS mail_relationship ON sent_mail(owner, relationship);
         CREATE TABLE IF NOT EXISTS mail_archive (
-            id INTEGER PRIMARY KEY, owner TEXT NOT NULL, fingerprint TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, fingerprint TEXT NOT NULL,
             subject TEXT NOT NULL, sent_at TEXT NOT NULL, sender TEXT NOT NULL,
             to_json TEXT NOT NULL, cc_json TEXT NOT NULL, original_body TEXT NOT NULL,
             original_authored_body TEXT NOT NULL, source_name TEXT NOT NULL,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS sent_mail (
             created_at TEXT NOT NULL, PRIMARY KEY(owner, recipient)
         );
         CREATE TABLE IF NOT EXISTS received_replies (
-            id INTEGER PRIMARY KEY, owner TEXT NOT NULL, recipient TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, recipient TEXT NOT NULL,
             body TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS received_conversation ON received_replies(owner, recipient);

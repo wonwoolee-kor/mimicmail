@@ -119,6 +119,9 @@ pub fn ingest(
         }
         let mut pending = Vec::new();
         for recipient in recipients {
+            if crate::gui::conversation_deleted(db, &owner_id, &privacy::person_id(recipient))? {
+                continue;
+            }
             if !db::exists(
                 db,
                 "SELECT 1 FROM sent_mail WHERE owner=? AND fingerprint=? AND recipient=?",
@@ -157,7 +160,11 @@ pub fn ingest(
         }
         let stored = privacy::stored_mail(&mail);
         let tx = db.transaction()?;
+        let mut inserted = false;
         for (recipient, profile) in pending.iter().zip(&profiles) {
+            if crate::gui::conversation_deleted(&tx, &owner_id, &privacy::person_id(recipient))? {
+                continue;
+            }
             tx.execute(
                 "INSERT INTO sent_mail VALUES (?,?,?,?,?,?,?,?,?)",
                 params![
@@ -172,6 +179,12 @@ pub fn ingest(
                     stored.authored_body
                 ],
             )?;
+            inserted = true;
+        }
+        if !inserted {
+            tx.commit()?;
+            increment(&mut counts, "skipped");
+            continue;
         }
         tx.execute("INSERT OR IGNORE INTO mail_archive (owner,fingerprint,subject,sent_at,sender,to_json,cc_json,original_body,original_authored_body,source_name,context_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)",params![owner_id,stored.fingerprint,stored.subject,sent_at.map(|s| s.to_rfc3339()).unwrap_or_default(),stored.sender,serde_json::to_string(&stored.to)?,serde_json::to_string(&stored.cc)?,stored.body,stored.authored_body,privacy::redact(&path.file_name().unwrap_or_default().to_string_lossy()),stored.context.to_string()])?;
         tx.commit()?;
