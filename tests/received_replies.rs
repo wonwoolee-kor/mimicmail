@@ -1,6 +1,8 @@
+use mimicmail::drafting;
+use mimicmail::search;
 mod common;
 use common::*;
-use mimicmail::{array, db, gui, privacy, text};
+use mimicmail::{archive, array, db, privacy, text};
 use serde_json::json;
 
 #[test]
@@ -9,13 +11,15 @@ fn replies_persist_as_searchable_facts_without_changing_sent_style() {
     let path = tmp.path().join("mail.sqlite3");
     let db = db::connect(&path).unwrap();
     load_tables(&db, &legacy()["tables"]);
-    let before = gui::conversation(&db, "me@example.com", "boss@example.com").unwrap();
-    let styles = gui::draft_context(&db, "me@example.com", "boss@example.com", "reply").unwrap();
-    let saved = gui::create_reply(&db, &json!({"owner":"me@example.com","recipient":"boss@example.com","body":"검토완료\n문의: boss@example.com"})).unwrap();
+    let before = archive::conversation(&db, "me@example.com", "boss@example.com").unwrap();
+    let styles =
+        drafting::selected_context(&db, "me@example.com", "boss@example.com", "reply", &[], &[])
+            .unwrap();
+    let saved = archive::create_reply(&db, &json!({"owner":"me@example.com","recipient":"boss@example.com","body":"검토완료\n문의: boss@example.com"})).unwrap();
     let key = text(&saved, "key").to_owned();
     drop(db);
     let db = db::connect(&path).unwrap();
-    let data = gui::conversation(&db, "me@example.com", "boss@example.com").unwrap();
+    let data = archive::conversation(&db, "me@example.com", "boss@example.com").unwrap();
     assert_eq!(data["messages"], before["messages"]);
     let reply = array(&data, "timeline").last().unwrap();
     assert_eq!(reply["keys"], json!([key]));
@@ -26,17 +30,26 @@ fn replies_persist_as_searchable_facts_without_changing_sent_style() {
     assert_eq!(reply["body"], "검토완료\n문의: [이메일 삭제됨]");
     assert!(reply.get("sent_at").is_none());
     assert!(array(reply, "source_ids").is_empty());
-    let list = gui::conversations(&db, "검토완료", true, "").unwrap();
+    let list = archive::conversations(&db, "검토완료", true, "", false).unwrap();
     assert_eq!(array(&list, "items").len(), 1);
     assert_eq!(list["items"][0]["search_match"]["key"], key);
     assert_eq!(
-        gui::search_matches(array(&data, "timeline"), "검토완료").len(),
+        search::matches(
+            array(&data, "timeline"),
+            "검토완료",
+            usize::MAX,
+            &mimicmail::work::Work::default()
+        )
+        .unwrap()
+        .len(),
         1
     );
-    let catalog = gui::draft_context(&db, "me@example.com", "boss@example.com", "reply").unwrap();
+    let catalog =
+        drafting::selected_context(&db, "me@example.com", "boss@example.com", "reply", &[], &[])
+            .unwrap();
     assert_eq!(catalog["style_candidates"], styles["style_candidates"]);
     assert!(!catalog.to_string().contains("검토완료"));
-    let selected = gui::selected_context(
+    let selected = drafting::selected_context(
         &db,
         "me@example.com",
         "boss@example.com",
@@ -54,14 +67,14 @@ fn replies_persist_as_searchable_facts_without_changing_sent_style() {
         ("other@example.com", "boss@example.com"),
         ("me@example.com", "peer@example.com"),
     ] {
-        let data = gui::conversation(&db, owner, recipient).unwrap();
+        let data = archive::conversation(&db, owner, recipient).unwrap();
         assert!(!data.to_string().contains("검토완료"));
         assert!(
-            gui::delete_message(&db, &json!({"owner":owner,"recipient":recipient,"key":key}))
+            archive::delete_message(&db, &json!({"owner":owner,"recipient":recipient,"key":key}))
                 .is_err()
         );
     }
-    gui::delete_message(
+    archive::delete_message(
         &db,
         &json!({"owner":"me@example.com","recipient":"boss@example.com","key":key}),
     )
@@ -69,18 +82,18 @@ fn replies_persist_as_searchable_facts_without_changing_sent_style() {
     drop(db);
     let db = db::connect(&path).unwrap();
     assert_eq!(
-        gui::conversation(&db, "me@example.com", "boss@example.com").unwrap(),
+        archive::conversation(&db, "me@example.com", "boss@example.com").unwrap(),
         before
     );
     assert!(
         array(
-            &gui::conversations(&db, "검토완료", false, "").unwrap(),
+            &archive::conversations(&db, "검토완료", false, "", false).unwrap(),
             "items"
         )
         .is_empty()
     );
     assert!(
-        gui::selected_context(
+        drafting::selected_context(
             &db,
             "me@example.com",
             "boss@example.com",
@@ -101,34 +114,36 @@ fn replies_persist_as_searchable_facts_without_changing_sent_style() {
 #[test]
 fn reply_only_contacts_keep_label_style_candidates_and_distinct_messages() {
     let db = populated();
-    gui::update_contact_label(&db, &json!({"owner":"me@example.com","recipient":"boss@example.com","label":"교수","revision":0})).unwrap();
-    let created = gui::create_conversation(
+    archive::update_contact_label(&db, &json!({"owner":"me@example.com","recipient":"boss@example.com","label":"교수","revision":0})).unwrap();
+    let created = archive::create_conversation(
         &db,
         &json!({"owner":"me@example.com","name":"새 교수","label":"교수"}),
     )
     .unwrap();
     let recipient = text(&created["contact"], "recipient");
-    let before = gui::draft_context(&db, "me@example.com", recipient, "reply").unwrap();
+    let before =
+        drafting::selected_context(&db, "me@example.com", recipient, "reply", &[], &[]).unwrap();
     assert!(!array(&before, "style_candidates").is_empty());
     let payload = json!({"owner":"me@example.com","recipient":recipient,"body":"확인했습니다."});
-    let first = gui::create_reply(&db, &payload).unwrap();
-    let second = gui::create_reply(&db, &payload).unwrap();
+    let first = archive::create_reply(&db, &payload).unwrap();
+    let second = archive::create_reply(&db, &payload).unwrap();
     assert_ne!(first["key"], second["key"]);
-    let data = gui::conversation(&db, "me@example.com", recipient).unwrap();
+    let data = archive::conversation(&db, "me@example.com", recipient).unwrap();
     assert_eq!(data["timeline"][0]["sender_name"], "새 교수");
     assert_eq!(array(&data, "timeline").len(), 2);
     assert!(array(&data, "messages").is_empty());
-    let after = gui::draft_context(&db, "me@example.com", recipient, "reply").unwrap();
+    let after =
+        drafting::selected_context(&db, "me@example.com", recipient, "reply", &[], &[]).unwrap();
     assert_eq!(after["style_candidates"], before["style_candidates"]);
-    let list = gui::conversations(&db, "확인했습니다", true, "교수").unwrap();
+    let list = archive::conversations(&db, "확인했습니다", true, "교수", false).unwrap();
     assert_eq!(list["items"][0]["recipient"], recipient);
     assert_eq!(list["items"][0]["reply_count"], 2);
-    gui::delete_message(
+    archive::delete_message(
         &db,
         &json!({"owner":"me@example.com","recipient":recipient,"key":first["key"]}),
     )
     .unwrap();
-    let data = gui::conversation(&db, "me@example.com", recipient).unwrap();
+    let data = archive::conversation(&db, "me@example.com", recipient).unwrap();
     assert_eq!(array(&data, "timeline").len(), 1);
     assert_eq!(data["timeline"][0]["keys"][0], second["key"]);
 }
@@ -144,7 +159,7 @@ fn reply_validation_rejects_empty_bodies_and_unknown_conversations() {
         json!({"owner":"me@example.com","recipient":"missing","body":"내용"}),
         json!({"body":"내용"}),
     ] {
-        assert!(gui::create_reply(&db, &payload).is_err());
+        assert!(archive::create_reply(&db, &payload).is_err());
     }
     assert!(
         db::rows(&db, "SELECT * FROM received_replies", [])
@@ -158,8 +173,8 @@ fn replies_edit_without_reviving_deleted_or_overwriting_stale_data() {
     let db = populated();
     let payload =
         json!({"owner":"me@example.com","recipient":"boss@example.com","body":"처음 답장"});
-    let saved = gui::create_reply(&db, &payload).unwrap();
-    let data = gui::conversation(&db, "me@example.com", "boss@example.com").unwrap();
+    let saved = archive::create_reply(&db, &payload).unwrap();
+    let data = archive::conversation(&db, "me@example.com", "boss@example.com").unwrap();
     let reply = array(&data, "timeline")
         .iter()
         .find(|i| i["keys"][0] == saved["key"])
@@ -169,14 +184,14 @@ fn replies_edit_without_reviving_deleted_or_overwriting_stale_data() {
     for field in ["owner", "recipient"] {
         let mut wrong = edit.clone();
         wrong[field] = json!("someone@example.com");
-        assert!(gui::update_reply(&db, &wrong).is_err());
+        assert!(archive::update_reply(&db, &wrong).is_err());
     }
-    gui::update_reply(&db, &edit).unwrap();
+    archive::update_reply(&db, &edit).unwrap();
     assert!(
-        gui::update_reply(&db, &edit).is_err(),
+        archive::update_reply(&db, &edit).is_err(),
         "stale edit must fail"
     );
-    let data = gui::conversation(&db, "me@example.com", "boss@example.com").unwrap();
+    let data = archive::conversation(&db, "me@example.com", "boss@example.com").unwrap();
     let reply = array(&data, "timeline")
         .iter()
         .find(|i| i["keys"][0] == saved["key"])
@@ -184,44 +199,45 @@ fn replies_edit_without_reviving_deleted_or_overwriting_stale_data() {
     assert_eq!(reply["body"], "수정 답장 [이메일 삭제됨]");
     assert!(reply.get("sent_at").is_none());
     edit["original_body"] = reply["body"].clone();
-    gui::delete_message(&db, &edit).unwrap();
-    assert!(gui::update_reply(&db, &edit).is_err());
+    archive::delete_message(&db, &edit).unwrap();
+    assert!(archive::update_reply(&db, &edit).is_err());
 }
 
 #[test]
 fn manual_conversation_rename_preserves_identity_replies_and_label() {
     let db = populated();
-    let created = gui::create_conversation(
+    let created = archive::create_conversation(
         &db,
         &json!({"owner":"me@example.com","name":"이름 오타","label":"교수"}),
     )
     .unwrap();
     let recipient = &created["contact"]["recipient"];
-    gui::create_reply(
+    archive::create_reply(
         &db,
         &json!({"owner":"me@example.com","recipient":recipient,"body":"답장"}),
     )
     .unwrap();
     let mut edit = json!({"owner":"me@example.com","recipient":recipient,"original_name":"이름 오타","name":"고친 이름"});
-    gui::rename_conversation(&db, &edit).unwrap();
-    assert!(gui::rename_conversation(&db, &edit).is_err());
-    let list = gui::conversations(&db, "고친 이름", false, "교수").unwrap();
+    archive::rename_conversation(&db, &edit).unwrap();
+    assert!(archive::rename_conversation(&db, &edit).is_err());
+    let list = archive::conversations(&db, "고친 이름", false, "교수", false).unwrap();
     assert_eq!(list["items"][0]["recipient"], *recipient);
     assert_eq!(list["items"][0]["reply_count"], 1);
-    let data = gui::conversation(&db, "me@example.com", recipient.as_str().unwrap()).unwrap();
+    let data = archive::conversation(&db, "me@example.com", recipient.as_str().unwrap()).unwrap();
     assert_eq!(data["timeline"][0]["sender_name"], "고친 이름");
     edit["original_name"] = json!("고친 이름");
-    gui::create_conversation(&db, &json!({"owner":"me@example.com","name":"다른 사람"})).unwrap();
+    archive::create_conversation(&db, &json!({"owner":"me@example.com","name":"다른 사람"}))
+        .unwrap();
     for name in [" ", "다른 사람"] {
         edit["name"] = json!(name);
-        assert!(gui::rename_conversation(&db, &edit).is_err());
+        assert!(archive::rename_conversation(&db, &edit).is_err());
     }
     edit["name"] = json!("변경");
     edit["owner"] = json!("other@example.com");
-    assert!(gui::rename_conversation(&db, &edit).is_err());
+    assert!(archive::rename_conversation(&db, &edit).is_err());
     edit["owner"] = json!("me@example.com");
     edit["recipient"] = json!("boss@example.com");
-    assert!(gui::rename_conversation(&db, &edit).is_err());
+    assert!(archive::rename_conversation(&db, &edit).is_err());
 }
 
 #[test]
@@ -230,12 +246,12 @@ fn migration_removes_reply_timestamps_and_cached_copies_preserving_messages() {
     let path = tmp.path().join("mail.sqlite3");
     let db = db::connect(&path).unwrap();
     load_tables(&db, &legacy()["tables"]);
-    let saved = gui::create_reply(
+    let saved = archive::create_reply(
         &db,
         &json!({"owner":"me@example.com","recipient":"boss@example.com","body":"보존할 답장"}),
     )
     .unwrap();
-    let before = gui::conversation(&db, "me@example.com", "boss@example.com").unwrap();
+    let before = archive::conversation(&db, "me@example.com", "boss@example.com").unwrap();
     db.execute_batch("ALTER TABLE received_replies ADD COLUMN sent_at TEXT NOT NULL DEFAULT '2026-11-03T09:30:00+09:00';").unwrap();
     mimicmail::mailbox::initialize(&db).unwrap();
     let work = mimicmail::work::Work::default();
@@ -258,7 +274,7 @@ fn migration_removes_reply_timestamps_and_cached_copies_preserving_messages() {
             .is_empty()
     );
     assert_eq!(
-        gui::conversation(&db, "me@example.com", "boss@example.com").unwrap(),
+        archive::conversation(&db, "me@example.com", "boss@example.com").unwrap(),
         before
     );
     mimicmail::mailbox::initialize(&db).unwrap();

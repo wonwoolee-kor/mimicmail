@@ -209,10 +209,7 @@ struct Item {
     sort_at: String,
     quote_order: usize,
 }
-pub fn timeline(messages: &[Value], owner: &str, deleted: &HashSet<String>) -> Vec<Value> {
-    timeline_checked(messages, owner, deleted, &crate::work::Work::default()).unwrap()
-}
-pub fn timeline_checked(
+pub fn timeline(
     messages: &[Value],
     owner: &str,
     deleted: &HashSet<String>,

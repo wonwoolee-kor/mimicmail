@@ -1,6 +1,7 @@
+use mimicmail::drafting;
 mod common;
 use common::*;
-use mimicmail::{array, context, db, gui, mail};
+use mimicmail::{archive, array, context, db, mail};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
@@ -53,7 +54,7 @@ fn existing_database_search_edit_labels_and_deletion_match_python() {
     for state in fixture["states"].as_array().unwrap() {
         match state["action"].as_str() {
             Some("edit") => {
-                gui::update_mail(
+                archive::update_mail(
                     &db,
                     state["id"].as_i64().unwrap(),
                     &anonymized(&state["payload"], ""),
@@ -61,25 +62,37 @@ fn existing_database_search_edit_labels_and_deletion_match_python() {
                 .unwrap();
             }
             Some("label") => {
-                gui::update_contact_label(&db, &state["payload"]).unwrap();
+                archive::update_contact_label(&db, &state["payload"]).unwrap();
             }
             Some("delete") => {
-                gui::delete_message(&db, &state["payload"]).unwrap();
+                archive::delete_message(&db, &state["payload"]).unwrap();
             }
             _ => {}
         }
         for (key, expected) in state["expected"].as_object().unwrap() {
             let mut actual = match key.as_str() {
-                "list" => gui::conversations(&db, "", false, "").unwrap(),
+                "list" => archive::conversations(&db, "", false, "", false).unwrap(),
                 "conversation" => {
-                    gui::conversation(&db, "me@example.com", "boss@example.com").unwrap()
+                    archive::conversation(&db, "me@example.com", "boss@example.com").unwrap()
                 }
-                "context" => {
-                    gui::draft_context(&db, "me@example.com", "boss@example.com", "other").unwrap()
-                }
-                "replies" => gui::conversations(&db, "", true, "").unwrap(),
-                key => gui::conversations(&db, key.strip_prefix("search:").unwrap(), false, "")
-                    .unwrap(),
+                "context" => drafting::selected_context(
+                    &db,
+                    "me@example.com",
+                    "boss@example.com",
+                    "other",
+                    &[],
+                    &[],
+                )
+                .unwrap(),
+                "replies" => archive::conversations(&db, "", true, "", false).unwrap(),
+                key => archive::conversations(
+                    &db,
+                    key.strip_prefix("search:").unwrap(),
+                    false,
+                    "",
+                    false,
+                )
+                .unwrap(),
             };
             if key == "context" {
                 assert_eq!(actual["current_facts"]["conversation"], json!([]));
@@ -89,7 +102,7 @@ fn existing_database_search_edit_labels_and_deletion_match_python() {
                     .iter()
                     .map(|i| i["key"].as_str().unwrap().to_owned())
                     .collect();
-                let mut selected = gui::selected_context(
+                let mut selected = drafting::selected_context(
                     &db,
                     "me@example.com",
                     "boss@example.com",
@@ -148,10 +161,10 @@ fn persisted_python_deletion_keys_are_honored() {
         &db,
         &serde_json::from_str(include_str!("fixtures/deleted.json")).unwrap(),
     );
-    let data = gui::conversation(&db, "me@example.com", "boss@example.com").unwrap();
+    let data = archive::conversation(&db, "me@example.com", "boss@example.com").unwrap();
     assert!(array(&data, "timeline").is_empty());
     assert_eq!(
-        gui::conversations(&db, "", false, "").unwrap()["total_mails"],
+        archive::conversations(&db, "", false, "", false).unwrap()["total_mails"],
         1
     );
 }
@@ -164,7 +177,14 @@ fn read_only_context_does_not_write_or_create_database() {
     drop(db);
     let before = std::fs::read(&path).unwrap();
     let db = db::open(&path, true).unwrap();
-    assert_eq!(gui::draft_context(&db,"me@example.com","boss@example.com","other").unwrap()["current_facts"]["conversation"].as_array().unwrap().len(),0);
+    assert_eq!(
+        drafting::selected_context(&db, "me@example.com", "boss@example.com", "other", &[], &[])
+            .unwrap()["current_facts"]["conversation"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
     drop(db);
     assert_eq!(before, std::fs::read(&path).unwrap());
     let missing = tmp.path().join("missing.sqlite3");
@@ -174,8 +194,7 @@ fn read_only_context_does_not_write_or_create_database() {
 #[test]
 fn legacy_schema_without_context_column_is_upgraded_once() {
     let db = rusqlite::Connection::open_in_memory().unwrap();
-    db.execute_batch(include_str!("../assets/schema.sql"))
-        .unwrap();
+    db.execute_batch(include_str!("../sql/schema.sql")).unwrap();
     db::initialize(&db).unwrap();
     db::initialize(&db).unwrap();
     assert_eq!(
@@ -212,7 +231,13 @@ fn timeline_deduplicates_same_instant_but_preserves_repeated_messages() {
             json!([reply, own]),
         ),
     ];
-    let data = context::timeline(&messages, "me@example.com", &HashSet::new());
+    let data = context::timeline(
+        &messages,
+        "me@example.com",
+        &HashSet::new(),
+        &mimicmail::work::Work::default(),
+    )
+    .unwrap();
     assert_eq!(
         data.iter().map(|m| m["kind"].clone()).collect::<Vec<_>>(),
         vec![json!("sent"), json!("quote"), json!("sent"), json!("sent")]
@@ -264,12 +289,12 @@ fn korea_date_boundary_and_unknown_timezone() {
 fn manual_conversation_persists_and_reuses_contacts() {
     let db = populated();
     let payload = json!({"owner":"ME@example.com","name":"새 수신자","label":"교수"});
-    let first = gui::create_conversation(&db, &payload).unwrap();
+    let first = archive::create_conversation(&db, &payload).unwrap();
     assert_eq!(first["created"], true);
     assert_eq!(first["contact"]["count"], 0);
     assert_eq!(first["contact"]["name"], "새 수신자");
     assert_eq!(
-        gui::create_conversation(&db, &payload).unwrap()["created"],
+        archive::create_conversation(&db, &payload).unwrap()["created"],
         false
     );
     assert_eq!(
@@ -279,14 +304,14 @@ fn manual_conversation_persists_and_reuses_contacts() {
         2
     );
     assert_eq!(
-        gui::conversations(&db, "", false, "교수").unwrap()["items"][0]["recipient"],
+        archive::conversations(&db, "", false, "교수", false).unwrap()["items"][0]["recipient"],
         first["contact"]["recipient"]
     );
 }
 #[test]
 fn invalid_mutations_leave_database_unchanged_and_conflicts_fail() {
     let db = populated();
-    let mail = gui::get_mail(&db, 1).unwrap();
+    let mail = archive::get_mail(&db, 1).unwrap();
     let payload = json!({"revision":0,"authored_body":"내 문체","recipients":mail["recipients"]});
     for (key, value) in [
         ("authored_body", json!(" ")),
@@ -295,12 +320,12 @@ fn invalid_mutations_leave_database_unchanged_and_conflicts_fail() {
     ] {
         let mut invalid = payload.clone();
         invalid[key] = value;
-        assert!(gui::update_mail(&db, 1, &invalid).is_err());
+        assert!(archive::update_mail(&db, 1, &invalid).is_err());
     }
-    assert_eq!(gui::get_mail(&db, 1).unwrap()["revision"], 0);
-    gui::update_mail(&db, 1, &payload).unwrap();
+    assert_eq!(archive::get_mail(&db, 1).unwrap()["revision"], 0);
+    archive::update_mail(&db, 1, &payload).unwrap();
     assert_eq!(
-        gui::update_mail(&db, 1, &payload)
+        archive::update_mail(&db, 1, &payload)
             .unwrap_err()
             .downcast_ref::<mimicmail::Fault>()
             .unwrap()
@@ -308,20 +333,21 @@ fn invalid_mutations_leave_database_unchanged_and_conflicts_fail() {
         409
     );
     let label = json!({"owner":"me@example.com","recipient":"boss@example.com","label":"교수","revision":0});
-    gui::update_contact_label(&db, &label).unwrap();
-    assert!(gui::update_contact_label(&db, &label).is_err());
+    archive::update_contact_label(&db, &label).unwrap();
+    assert!(archive::update_contact_label(&db, &label).is_err());
 }
 #[test]
 fn new_recipient_style_does_not_copy_other_conversation_facts() {
     let db = populated();
-    gui::update_contact_label(&db,&json!({"owner":"me@example.com","recipient":"boss@example.com","label":"교수","revision":0})).unwrap();
-    let created = gui::create_conversation(
+    archive::update_contact_label(&db,&json!({"owner":"me@example.com","recipient":"boss@example.com","label":"교수","revision":0})).unwrap();
+    let created = archive::create_conversation(
         &db,
         &json!({"owner":"me@example.com","name":"새 수신자","label":"교수"}),
     )
     .unwrap();
     let recipient = created["contact"]["recipient"].as_str().unwrap();
-    let data = gui::draft_context(&db, "me@example.com", recipient, "other").unwrap();
+    let data =
+        drafting::selected_context(&db, "me@example.com", recipient, "other", &[], &[]).unwrap();
     assert_eq!(data["current_facts"]["conversation"], json!([]));
     assert_eq!(
         data["style_candidates"][0]["recipient"],
@@ -333,14 +359,15 @@ fn new_recipient_style_does_not_copy_other_conversation_facts() {
         .unwrap()
         .to_owned();
     let selected =
-        gui::selected_context(&db, "me@example.com", recipient, "other", &[], &[id]).unwrap();
+        drafting::selected_context(&db, "me@example.com", recipient, "other", &[], &[id]).unwrap();
     assert_eq!(
         selected["style_references"][0]["recipient"],
         mimicmail::privacy::person_id("boss@example.com")
     );
     assert_eq!(selected["current_facts"]["conversation"], json!([]));
     assert_eq!(
-        gui::draft_context(&db, "other@example.com", recipient, "other").unwrap()["style_references"],
+        drafting::selected_context(&db, "other@example.com", recipient, "other", &[], &[]).unwrap()
+            ["style_references"],
         json!([])
     );
 }

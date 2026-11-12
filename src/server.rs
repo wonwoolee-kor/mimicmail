@@ -1,5 +1,5 @@
 use crate::{
-    Fault, db, gui, mailbox, pipeline,
+    Fault, archive, db, drafting, mailbox, pipeline, search, settings,
     work::{CancelOnDrop, Work},
 };
 use anyhow::Result;
@@ -169,8 +169,8 @@ async fn handle(
             .strip_prefix("/api/mail/")
             .and_then(|s| s.parse::<i64>().ok());
         let result = match (method.as_str(), path.as_str(), id) {
-            ("GET", "/api/general-context", _) => gui::general_context(&db)?,
-            ("PUT", "/api/general-context", _) => gui::update_general_context(&db, &payload)?,
+            ("GET", "/api/general-context", _) => settings::get(&db)?,
+            ("PUT", "/api/general-context", _) => settings::update(&db, &payload)?,
             ("GET", "/api/conversations", _) => {
                 let mut result = mailbox::read(&db, &work, |db| {
                     mailbox::conversations(
@@ -183,9 +183,16 @@ async fn handle(
                     )
                 })?;
                 result["token"] = json!(state.token);
-                result["purposes"] = gui::labels(&pipeline::PURPOSES, &gui::PURPOSE_LABELS);
-                result["relationships"] =
-                    gui::labels(&pipeline::RELATIONSHIPS, &gui::RELATIONSHIP_LABELS);
+                result["purposes"] = pipeline::PURPOSES
+                    .iter()
+                    .zip(pipeline::PURPOSE_LABELS)
+                    .map(|(key, label)| ((*key).to_owned(), json!(label)))
+                    .collect();
+                result["relationships"] = pipeline::RELATIONSHIPS
+                    .iter()
+                    .zip(pipeline::RELATIONSHIP_LABELS)
+                    .map(|(key, label)| ((*key).to_owned(), json!(label)))
+                    .collect();
                 result
             }
             ("GET", "/api/conversation", _) => {
@@ -222,33 +229,35 @@ async fn handle(
                             &work,
                         )
                     })?;
-                    result["prompt_reference"] = gui::prompt_reference(&state.path)?;
+                    result["prompt_reference"] = drafting::prompt_reference(&state.path)?;
                     return Ok(serde_json::to_vec(&result)?);
                 }
-                let mut result = gui::conversation(&db, arg("owner"), arg("recipient"))?;
-                result["search_matches"] = json!(gui::search_matches(
+                let mut result = archive::conversation(&db, arg("owner"), arg("recipient"))?;
+                result["search_matches"] = json!(search::matches(
                     crate::array(&result, "timeline"),
-                    arg("q")
-                ));
+                    arg("q"),
+                    usize::MAX,
+                    &work
+                )?);
                 if arg("compact") == "1" {
                     result["messages"] = crate::array(&result, "messages")
                         .iter()
                         .map(|m| crate::select(m, &["id", "subject", "revision", "deleted"]))
                         .collect();
                 }
-                result["prompt_reference"] = gui::prompt_reference(&state.path)?;
+                result["prompt_reference"] = drafting::prompt_reference(&state.path)?;
                 result
             }
-            ("GET", _, Some(id)) => gui::get_mail(&db, id)?,
-            ("POST", "/api/conversation", _) => gui::create_conversation(&db, &payload)?,
-            ("POST", "/api/reply", _) => gui::create_reply(&db, &payload)?,
-            ("POST", "/api/sent", _) => gui::create_sent_mail(&db, &payload)?,
-            ("PUT", "/api/reply", _) => gui::update_reply(&db, &payload)?,
-            ("PUT", "/api/conversation", _) => gui::rename_conversation(&db, &payload)?,
-            ("PUT", "/api/contact-label", _) => gui::update_contact_label(&db, &payload)?,
-            ("PUT", _, Some(id)) => gui::update_mail(&db, id, &payload)?,
-            ("DELETE", "/api/message", _) => gui::delete_message(&db, &payload)?,
-            ("DELETE", "/api/conversation", _) => gui::delete_conversation(&db, &payload)?,
+            ("GET", _, Some(id)) => archive::get_mail(&db, id)?,
+            ("POST", "/api/conversation", _) => archive::create_conversation(&db, &payload)?,
+            ("POST", "/api/reply", _) => archive::create_reply(&db, &payload)?,
+            ("POST", "/api/sent", _) => archive::create_sent_mail(&db, &payload)?,
+            ("PUT", "/api/reply", _) => archive::update_reply(&db, &payload)?,
+            ("PUT", "/api/conversation", _) => archive::rename_conversation(&db, &payload)?,
+            ("PUT", "/api/contact-label", _) => archive::update_contact_label(&db, &payload)?,
+            ("PUT", _, Some(id)) => archive::update_mail(&db, id, &payload)?,
+            ("DELETE", "/api/message", _) => archive::delete_message(&db, &payload)?,
+            ("DELETE", "/api/conversation", _) => archive::delete_conversation(&db, &payload)?,
             _ => return Err(crate::fault(404, "페이지를 찾을 수 없습니다.")),
         };
         Ok(serde_json::to_vec(&result)?)

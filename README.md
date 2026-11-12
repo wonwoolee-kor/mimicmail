@@ -17,6 +17,23 @@ macOS에서는 `Mimicmail.command`로 실행합니다. 주소는 `http://127.0.0
   --to recipient@example.com --request '작성할 내용'
 ```
 
+## 코드 구조
+
+| 경로 | 역할 |
+| --- | --- |
+| `src/main.rs`, `src/config.rs` | 명령 실행, CLI·환경변수·`.env` 설정 |
+| `src/mail.rs`, `src/context.rs` | MIME 해석, 인용문 추출, 대화 순서 구성 |
+| `src/archive.rs`, `src/db.rs` | 메일·대화 조회와 수정, DB 연결·마이그레이션 |
+| `src/mailbox.rs`, `src/search.rs` | 조회 캐시·페이지 처리, Unicode 검색 |
+| `src/settings.rs` | DB에 저장하는 General context |
+| `src/drafting.rs`, `src/pipeline.rs`, `src/llm.rs` | 사실·문체 후보 선택, 색인·초안 생성, 모델 실행 |
+| `src/privacy.rs`, `src/work.rs` | 개인정보 치환, 요청 취소·시간 제한 |
+| `src/server.rs`, `assets/` | 로컬 HTTP 서버와 브라우저 화면 |
+| `sql/`, `prompts/` | SQL 스키마, 모델 지시문 |
+| `tests/`, `scripts/` | 회귀 테스트, 자원 사용량 비교 |
+
+CLI와 HTTP 서버는 같은 보관함·문맥 코드를 호출합니다. 보관함 원본 테이블을 기준으로 조회 캐시를 재구성하며, 문체 편집·삭제·충돌 검사에는 트랜잭션을 사용합니다.
+
 ## 화면
 
 - **설정 → General context**: 모든 대화의 공통 정보.

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use mimicmail::{
-    db, gui,
+    db, drafting,
     llm::{Codex, LanguageModel, OpenAI},
     mail, pipeline, server,
 };
@@ -87,7 +87,7 @@ fn run(args: Args) -> Result<()> {
         let db = db::open(&args.db, true)?;
         println!(
             "{}",
-            serde_json::to_string_pretty(&gui::selected_context(
+            serde_json::to_string_pretty(&drafting::selected_context(
                 &db,
                 &user,
                 &to,

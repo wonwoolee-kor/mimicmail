@@ -1,7 +1,7 @@
 #![cfg(unix)]
 mod common;
 use common::*;
-use mimicmail::{db, gui};
+use mimicmail::{archive, db};
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -291,7 +291,7 @@ fn http_static_assets_host_origin_token_and_edit_conflict() {
     );
     let token = server.token(&client);
     let db = db::open(&server.dbpath(), true).unwrap();
-    let mail = gui::get_mail(&db, 1).unwrap();
+    let mail = archive::get_mail(&db, 1).unwrap();
     let payload =
         json!({"revision":0,"authored_body":"수정한 내 문체","recipients":mail["recipients"]});
     let endpoint = format!("{}/api/mail/1", server.url);

@@ -1,12 +1,15 @@
+pub mod archive;
 pub mod context;
 pub mod db;
-pub mod gui;
+pub mod drafting;
 pub mod llm;
 pub mod mail;
 pub mod mailbox;
 pub mod pipeline;
 pub mod privacy;
+pub mod search;
 pub mod server;
+pub mod settings;
 pub mod work;
 
 use serde_json::Value;

@@ -1,7 +1,8 @@
+use mimicmail::drafting;
 mod common;
 use common::*;
 use mimicmail::{
-    array, db, gui, mail,
+    archive, array, db, mail,
     pipeline::{self, DraftOptions},
 };
 use serde_json::{Value, json};
@@ -56,8 +57,8 @@ fn aliases_multiple_recipients_and_repeat_ingestion_preserve_edits() {
     .unwrap();
     assert_eq!(result, json!({"indexed":1,"skipped":0}));
     assert_eq!(llm.calls.len(), 2);
-    let mail = gui::get_mail(&db, 1).unwrap();
-    gui::update_mail(
+    let mail = archive::get_mail(&db, 1).unwrap();
+    archive::update_mail(
         &db,
         1,
         &json!({"revision":0,"authored_body":"편집한 문체","recipients":mail["recipients"]}),
@@ -74,11 +75,11 @@ fn aliases_multiple_recipients_and_repeat_ingestion_preserve_edits() {
     .unwrap();
     assert_eq!(result, json!({"indexed":0,"skipped":1}));
     assert_eq!(
-        gui::get_mail(&db, 1).unwrap()["authored_body"],
+        archive::get_mail(&db, 1).unwrap()["authored_body"],
         "편집한 문체"
     );
     assert_eq!(
-        pipeline::style_candidates(&db, "me@example.com", "boss@example.com", "unknown", true)
+        drafting::style_candidates(&db, "me@example.com", "boss@example.com", "unknown", true)
             .unwrap()
             .len(),
         1
@@ -181,13 +182,13 @@ fn verbatim_evidence_is_required() {
 fn existing_recipient_candidates_stay_with_that_recipient() {
     let db = populated();
     for recipient in ["boss@example.com", "peer@example.com"] {
-        gui::update_contact_label(
+        archive::update_contact_label(
             &db,
             &json!({"owner":"me@example.com","recipient":recipient,"label":"교수","revision":0}),
         )
         .unwrap();
     }
-    let found = pipeline::style_candidates(&db, "me@example.com", "boss@example.com", "교수", true)
+    let found = drafting::style_candidates(&db, "me@example.com", "boss@example.com", "교수", true)
         .unwrap();
     assert_eq!(found.len(), 1);
     assert_eq!(
@@ -195,7 +196,7 @@ fn existing_recipient_candidates_stay_with_that_recipient() {
         mimicmail::privacy::person_id("boss@example.com")
     );
     assert!(
-        pipeline::style_candidates(&db, "another@example.com", "boss@example.com", "교수", true)
+        drafting::style_candidates(&db, "another@example.com", "boss@example.com", "교수", true)
             .unwrap()
             .is_empty()
     );
@@ -203,7 +204,15 @@ fn existing_recipient_candidates_stay_with_that_recipient() {
 #[test]
 fn draft_separates_current_facts_and_historical_style() {
     let db = populated();
-    let catalog = gui::draft_context(&db, "me@example.com", "boss@example.com", "request").unwrap();
+    let catalog = drafting::selected_context(
+        &db,
+        "me@example.com",
+        "boss@example.com",
+        "request",
+        &[],
+        &[],
+    )
+    .unwrap();
     let mut llm = Fake::new(vec![
         unknown(),
         json!({"history_keys":[],"style_ids":[catalog["style_candidates"][0]["fingerprint"]]}),
@@ -243,7 +252,7 @@ fn draft_separates_current_facts_and_historical_style() {
 fn manual_role_applies_to_future_ingest_and_draft_override() {
     let tmp = tempfile::tempdir().unwrap();
     let mut db = populated();
-    gui::update_contact_label(&db,&json!({"owner":"me@example.com","recipient":"boss@example.com","label":"교수","revision":0})).unwrap();
+    archive::update_contact_label(&db,&json!({"owner":"me@example.com","recipient":"boss@example.com","label":"교수","revision":0})).unwrap();
     let raw = raw("me@example.com", "boss@example.com", "새 메일", "");
     let mut llm = Fake::new(vec![unknown()]);
     pipeline::ingest(
@@ -256,7 +265,7 @@ fn manual_role_applies_to_future_ingest_and_draft_override() {
     )
     .unwrap();
     assert_eq!(
-        gui::get_mail(&db, 3).unwrap()["recipients"][0]["role"],
+        archive::get_mail(&db, 3).unwrap()["recipients"][0]["role"],
         "교수"
     );
     for (role, expected) in [(None, "교수"), (Some("학과장"), "학과장")] {

@@ -1,19 +1,14 @@
 //! Disk-backed browsing projections. Source rows remain authoritative; triggers
 //! invalidate affected conversations even when another CLI/process edits the DB.
-use crate::{array, db, gui, privacy, select, text, work::Work};
+use crate::{archive, array, db, pipeline, privacy, search, select, text, work::Work};
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
-use unicode_casefold::UnicodeCaseFold;
-
-fn fold(s: &str) -> String {
-    s.case_fold().collect()
-}
 
 pub fn initialize(db: &Connection) -> Result<()> {
     let tx = Transaction::new_unchecked(db, TransactionBehavior::Immediate)?;
-    tx.execute_batch(include_str!("../assets/browse-schema.sql"))?;
+    tx.execute_batch(include_str!("../sql/browse-schema.sql"))?;
     let current = db::exists(&tx, "SELECT 1 FROM browse_meta WHERE version=1", [])?;
     if !db::rows(&tx, "PRAGMA table_info(browse_items)", [])?
         .iter()
@@ -92,7 +87,7 @@ pub fn read<T>(
 }
 
 fn rebuild(db: &Connection, owner: &str, recipient: &str, work: &Work) -> Result<()> {
-    let data = gui::index_conversation(db, owner, recipient, work)?;
+    let data = archive::index_conversation(db, owner, recipient, work)?;
     let messages = array(&data, "messages");
     let items = array(&data, "timeline");
     let manual = db::one(
@@ -135,7 +130,7 @@ fn rebuild(db: &Connection, owner: &str, recipient: &str, work: &Work) -> Result
             crate::pipeline::PURPOSES
                 .iter()
                 .position(|v| *v == text(p, "purpose"))
-                .map(|i| gui::PURPOSE_LABELS[i])
+                .map(|i| pipeline::PURPOSE_LABELS[i])
         })
         .collect();
     let empty = json!({"sent_at":manual.as_ref().map(|m| text(m,"created_at")).unwrap_or(""),"subject":"","body":""});
@@ -145,7 +140,7 @@ fn rebuild(db: &Connection, owner: &str, recipient: &str, work: &Work) -> Result
         .rev()
         .find(|i| i.get("sent_at").is_some())
         .unwrap_or(&empty);
-    let summary = if gui::conversation_deleted(db, owner, recipient)?
+    let summary = if archive::conversation_deleted(db, owner, recipient)?
         || (items.is_empty() && manual.is_none())
     {
         Value::Null
@@ -179,10 +174,10 @@ fn rebuild(db: &Connection, owner: &str, recipient: &str, work: &Work) -> Result
             .as_i64()
             .and_then(|id| mails.get(&id))
             .unwrap_or(&Value::Null);
-        let body = fold(text(item, "body"));
-        let subject = fold(text(item, "subject"));
+        let body = search::fold(text(item, "body"));
+        let subject = search::fold(text(item, "subject"));
         let combined = format!("{} {}", text(item, "subject"), text(item, "body"));
-        let normalized = fold(&crate::context::readable(&combined));
+        let normalized = search::fold(&crate::context::readable(&combined));
         let search_text = (normalized != format!("{subject} {body}")).then_some(normalized);
         insert.execute(params![
             owner,
@@ -210,7 +205,7 @@ pub fn conversations(
     unlabeled: bool,
     work: &Work,
 ) -> Result<Value> {
-    let query = fold(query).trim().to_owned();
+    let query = search::fold(query).trim().to_owned();
     let colors: serde_json::Map<String, Value> = db::rows(db, "SELECT * FROM label_colors", [])?
         .into_iter()
         .map(|r| {
@@ -265,16 +260,16 @@ pub fn conversations(
             let recipient = text(&group, "recipient");
             let item = db.query_row("SELECT item FROM browse_items WHERE owner=?1 AND recipient=?2 AND (instr(search_body,?3)>0 OR instr(search_subject,?3)>0) ORDER BY position LIMIT 1",params![owner,recipient,query],|r|r.get::<_,String>(0));
             let preview = match item {
-                Ok(s) => gui::first_search_match(&[serde_json::from_str(&s)?], &query),
+                Ok(s) => search::first_match(&[serde_json::from_str(&s)?], &query, work)?,
                 Err(rusqlite::Error::QueryReturnedNoRows) => None,
                 Err(e) => return Err(e.into()),
             };
             matches = [recipient, text(&group, "name"), &label_text]
                 .iter()
-                .any(|s| fold(&crate::context::readable(s)).contains(&query))
+                .any(|s| search::fold(&crate::context::readable(s)).contains(&query))
                 || array(&details, "purposes")
                     .iter()
-                    .any(|p| fold(p.as_str().unwrap_or("")).contains(&query))
+                    .any(|p| search::fold(p.as_str().unwrap_or("")).contains(&query))
                 || db::exists(
                     db,
                     "SELECT 1 FROM browse_items WHERE owner=?1 AND recipient=?2 AND instr(coalesce(search_text,search_subject||' '||search_body),?3)>0 LIMIT 1",
@@ -307,7 +302,7 @@ pub struct Page {
 }
 
 fn ordered_matches(item: &Value, query: &str, work: &Work) -> Result<Vec<Value>> {
-    let mut matches = gui::search_matches_checked(std::slice::from_ref(item), query, work)?;
+    let mut matches = search::matches(std::slice::from_ref(item), query, usize::MAX, work)?;
     // The browser displays a subject before its message body.
     matches.sort_by_key(|m| m["field"] != "subject");
     Ok(matches)
@@ -342,7 +337,7 @@ pub fn conversation_page(
         params![owner, recipient],
         |r| r.get(0),
     )?;
-    let query = fold(query.trim());
+    let query = search::fold(query.trim());
     let limit = page.limit.clamp(1, 100);
     let mut counts = Vec::new();
     let mut match_total = 0;

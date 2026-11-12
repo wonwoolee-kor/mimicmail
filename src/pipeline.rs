@@ -1,6 +1,7 @@
 use crate::{
     context::mail_datetime,
     db,
+    drafting::{self, GENERATE},
     llm::{LanguageModel, object_schema},
     mail::{Mail, parse_mail, read_source},
     privacy, select, text,
@@ -33,8 +34,30 @@ pub const RELATIONSHIPS: [&str; 10] = [
     "external",
     "unknown",
 ];
-pub const CLASSIFY: &str = include_str!("../assets/classify.txt");
-pub const GENERATE: &str = include_str!("../assets/generate.txt");
+pub const PURPOSE_LABELS: [&str; 8] = [
+    "요청",
+    "답변",
+    "보고",
+    "일정",
+    "감사",
+    "사과",
+    "후속 확인",
+    "기타",
+];
+pub const RELATIONSHIP_LABELS: [&str; 10] = [
+    "상사",
+    "동료",
+    "부하",
+    "고객",
+    "공급자",
+    "지도교수",
+    "지도학생",
+    "개인",
+    "외부 관계자",
+    "미상",
+];
+
+pub const CLASSIFY: &str = include_str!("../prompts/classify.txt");
 pub fn profile_schema() -> Value {
     object_schema(
         json!({"purpose":{"type":"string","enum":PURPOSES},"role":{"type":"string"},"role_evidence":{"type":"string"},"relationship":{"type":"string","enum":RELATIONSHIPS},"relationship_evidence":{"type":"string"}}),
@@ -119,7 +142,8 @@ pub fn ingest(
         }
         let mut pending = Vec::new();
         for recipient in recipients {
-            if crate::gui::conversation_deleted(db, &owner_id, &privacy::person_id(recipient))? {
+            if crate::archive::conversation_deleted(db, &owner_id, &privacy::person_id(recipient))?
+            {
                 continue;
             }
             if !db::exists(
@@ -162,7 +186,8 @@ pub fn ingest(
         let tx = db.transaction()?;
         let mut inserted = false;
         for (recipient, profile) in pending.iter().zip(&profiles) {
-            if crate::gui::conversation_deleted(&tx, &owner_id, &privacy::person_id(recipient))? {
+            if crate::archive::conversation_deleted(&tx, &owner_id, &privacy::person_id(recipient))?
+            {
                 continue;
             }
             tx.execute(
@@ -194,32 +219,6 @@ pub fn ingest(
 }
 fn increment(value: &mut Value, key: &str) {
     value[key] = json!(value[key].as_u64().unwrap_or(0) + 1);
-}
-pub fn style_candidates(
-    db: &Connection,
-    owner: &str,
-    recipient: &str,
-    role: &str,
-    existing: bool,
-) -> Result<Vec<Value>> {
-    let owner = privacy::person_id(owner);
-    let recipient = privacy::person_id(recipient);
-    // All people in the exact label are candidates; relationship/purpose cannot admit outsiders.
-    let styles = db::rows(db,
-        "SELECT s.*,a.subject,a.sent_at FROM sent_mail s
-         LEFT JOIN mail_archive a ON a.owner=s.owner AND a.fingerprint=s.fingerprint
-         LEFT JOIN contact_labels l ON l.owner=s.owner AND l.recipient=s.recipient
-         WHERE s.owner=?1 AND NOT EXISTS (SELECT 1 FROM deleted_messages d WHERE d.owner=s.owner AND d.message_key='sent:'||s.fingerprint)
-         AND NOT EXISTS (SELECT 1 FROM deleted_messages d WHERE d.owner=s.owner AND d.message_key='conversation:'||s.recipient)
-         AND ((?3 AND s.recipient=?2) OR (NOT ?3 AND ?4!='unknown' AND ?4!='' AND l.label=?4))
-         ORDER BY s.recipient,a.sent_at DESC,s.fingerprint",
-        params![owner,recipient,existing,role])?;
-    let mut seen = HashSet::new();
-    let styles: Vec<_> = styles
-        .into_iter()
-        .filter(|s| seen.insert(text(s, "fingerprint").to_owned()))
-        .collect();
-    Ok(styles)
 }
 pub struct DraftOptions<'a> {
     pub owner: &'a str,
@@ -285,7 +284,7 @@ pub fn draft(
     if limit < 1 {
         bail!("검색 개수는 1 이상이어야 합니다.");
     }
-    let mut context = crate::gui::context_with_profile(db, &owner, &recipient, &profile, &[], &[])?;
+    let mut context = drafting::context_with_profile(db, &owner, &recipient, &profile, &[], &[])?;
     context["current_facts"]["request"] = json!(request);
     context["current_facts"]["conversation"] = mail.conversation();
     if !crate::array(&context, "history_candidates").is_empty()
@@ -313,7 +312,7 @@ pub fn draft(
         if style_ids.len() > limit {
             bail!("선택한 문체 예시가 검색 개수를 초과했습니다.");
         }
-        let selected = crate::gui::context_with_profile(
+        let selected = drafting::context_with_profile(
             db,
             &owner,
             &recipient,

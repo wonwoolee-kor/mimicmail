@@ -56,7 +56,7 @@ def snapshot(source, target):
 
 def synthetic(path, count, contacts):
     with sqlite3.connect(path) as db:
-        db.executescript((pathlib.Path(__file__).resolve().parents[1] / 'assets/schema.sql').read_text())
+        db.executescript((pathlib.Path(__file__).resolve().parents[1] / 'sql/schema.sql').read_text())
         db.execute("ALTER TABLE mail_archive ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'")
         db.execute('PRAGMA user_version=1')
         for i in range(count):

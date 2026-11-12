@@ -27,8 +27,14 @@ pub fn connect(path: &Path) -> Result<Connection> {
     initialize(&db)?;
     Ok(db)
 }
+pub(crate) fn immediate(db: &Connection) -> Result<Transaction<'_>> {
+    Ok(Transaction::new_unchecked(
+        db,
+        TransactionBehavior::Immediate,
+    )?)
+}
 pub fn initialize(db: &Connection) -> Result<()> {
-    db.execute_batch(include_str!("../assets/schema.sql"))?;
+    db.execute_batch(include_str!("../sql/schema.sql"))?;
     if !rows(db, "PRAGMA table_info(mail_archive)", [])?
         .iter()
         .any(|r| r["name"] == "context_json")
@@ -110,7 +116,7 @@ fn preserve_mail_ids(db: &Connection) -> Result<()> {
         );
         tx.execute_batch(&format!("CREATE TABLE {name}_monotonic {definition}; INSERT INTO {name}_monotonic SELECT * FROM {name}; DROP TABLE {name}; ALTER TABLE {name}_monotonic RENAME TO {name};"))?;
     }
-    tx.execute_batch(include_str!("../assets/schema.sql"))?;
+    tx.execute_batch(include_str!("../sql/schema.sql"))?;
     if cached {
         tx.execute("DELETE FROM browse_meta", [])?;
     }
