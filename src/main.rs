@@ -1,5 +1,7 @@
+mod config;
+
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand, ValueEnum};
+use config::{Args, Backend, Commands};
 use mimicmail::{
     db, drafting,
     llm::{Codex, LanguageModel, OpenAI},
@@ -7,69 +9,6 @@ use mimicmail::{
 };
 use std::path::PathBuf;
 
-#[derive(Parser)]
-#[command(version, about = "과거 발신 메일의 문체를 참고하는 이메일 초안 생성기")]
-struct Args {
-    #[arg(long, default_value = "data/mimicmail.sqlite3")]
-    db: PathBuf,
-    #[arg(long)]
-    user: Option<String>,
-    #[arg(long, value_enum, default_value = "codex")]
-    backend: Backend,
-    #[arg(long)]
-    model: Option<String>,
-    #[command(subcommand)]
-    command: Commands,
-}
-#[derive(Clone, ValueEnum)]
-enum Backend {
-    Codex,
-    Openai,
-}
-#[derive(Subcommand)]
-enum Commands {
-    #[command(about = "본인 발신 .eml을 분류하고 저장")]
-    Ingest {
-        #[arg(required=true,num_args=1..)]
-        paths: Vec<PathBuf>,
-        #[arg(long)]
-        alias: Vec<String>,
-        #[arg(long)]
-        since: Option<chrono::NaiveDate>,
-    },
-    #[command(about = "현재 대화를 바탕으로 초안 생성")]
-    Draft {
-        eml: PathBuf,
-        #[arg(long)]
-        to: String,
-        #[arg(long)]
-        request: String,
-        #[arg(long)]
-        role: Option<String>,
-        #[arg(long,value_parser=pipeline::RELATIONSHIPS)]
-        relationship: Option<String>,
-        #[arg(long,default_value="5",value_parser=clap::value_parser!(u32).range(1..))]
-        limit: u32,
-    },
-    #[command(about = "DB에서 대화·직급·문체 예시를 읽기 전용으로 조회")]
-    Context {
-        #[arg(long)]
-        to: String,
-        #[arg(long,default_value="other",value_parser=pipeline::PURPOSES)]
-        purpose: String,
-        #[arg(long)]
-        history_key: Vec<String>,
-        #[arg(long)]
-        style_id: Vec<String>,
-    },
-    #[command(about = "로컬 메일 보관함·편집기 열기")]
-    Gui {
-        #[arg(long, default_value = "8765")]
-        port: u16,
-        #[arg(long)]
-        no_open: bool,
-    },
-}
 fn run(args: Args) -> Result<()> {
     if let Commands::Gui { port, no_open } = args.command {
         return server::serve(&args.db, port, !no_open);
@@ -99,15 +38,8 @@ fn run(args: Args) -> Result<()> {
         return Ok(());
     }
     let mut llm: Box<dyn LanguageModel> = match args.backend {
-        Backend::Codex => Box::new(Codex::new(
-            args.model.or_else(|| std::env::var("CODEX_MODEL").ok()),
-        )?),
-        Backend::Openai => Box::new(OpenAI::new(
-            std::env::var("OPENAI_API_KEY").unwrap_or_default(),
-            args.model
-                .or_else(|| std::env::var("OPENAI_MODEL").ok())
-                .unwrap_or_default(),
-        )?),
+        Backend::Codex => Box::new(Codex::new(args.model)?),
+        Backend::Openai => Box::new(OpenAI::new(args.api_key, args.model.unwrap_or_default())?),
     };
     let result = match args.command {
         Commands::Ingest {
@@ -185,7 +117,7 @@ fn run(args: Args) -> Result<()> {
     Ok(())
 }
 fn main() {
-    if let Err(error) = run(Args::parse()) {
+    if let Err(error) = Args::load().and_then(run) {
         eprintln!("오류: {error:#}");
         std::process::exit(1);
     }

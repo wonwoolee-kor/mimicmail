@@ -17,6 +17,28 @@ macOS에서는 `Mimicmail.command`로 실행합니다. 주소는 `http://127.0.0
   --to recipient@example.com --request '작성할 내용'
 ```
 
+## 설정
+
+설정 파일은 선택 사항입니다. 프로젝트 폴더에서 `.env.example`을 `.env`로 복사한 뒤 필요한 값을 입력합니다.
+
+```sh
+cp .env.example .env
+```
+
+우선순위는 **CLI 옵션 → 실행 환경변수 → 현재 작업 폴더의 `.env` → 기본값**입니다. 상위 폴더의 `.env`는 읽지 않습니다. 상대 경로도 현재 작업 폴더를 기준으로 해석합니다. `Mimicmail.command`는 프로젝트 폴더에서 실행합니다.
+
+| 환경변수 | CLI 옵션 | 기본값·용도 |
+| --- | --- | --- |
+| `MIMICMAIL_DB` | `--db` | `data/mimicmail.sqlite3` |
+| `MIMICMAIL_USER` | `--user` | 색인·초안·문맥 조회의 본인 주소 또는 소유자 ID |
+| `MIMICMAIL_BACKEND` | `--backend` | `codex`; API를 사용하려면 `openai` |
+| `MIMICMAIL_PORT` | `gui --port` | `8765`; `0`이면 빈 포트 사용 |
+| `CODEX_MODEL` | `--model` | 생략하면 Codex CLI의 기본 모델 사용 |
+| `OPENAI_MODEL` | `--model` | OpenAI API 사용 시 필수 |
+| `OPENAI_API_KEY` | 없음 | OpenAI API 사용 시 필수 |
+
+GUI와 `context` 명령은 모델 로그인이나 API 키 없이 동작합니다. `.env`의 값은 프로그램 설정으로만 읽고 프로세스 환경변수에 복사하지 않습니다. `.env`와 로컬 데이터는 Git에서 제외하며, 비밀값이 없는 `.env.example`만 버전 관리합니다. OpenAI API를 선택하면 API 사용 요금을 별도로 부담합니다.
+
 ## 코드 구조
 
 | 경로 | 역할 |

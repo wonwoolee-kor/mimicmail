@@ -23,6 +23,8 @@ impl Server {
         load_tables(&db, &legacy()["tables"]);
         drop(db);
         let mut child = Command::new(BIN)
+            .env_clear()
+            .current_dir(tmp.path())
             .args([
                 "--db",
                 path.to_str().unwrap(),
@@ -392,6 +394,8 @@ fn http_create_delete_validation_and_readonly_context() {
     );
     let before = std::fs::read(server.dbpath()).unwrap();
     let result = Command::new(BIN)
+        .env_clear()
+        .current_dir(server.tmp.path())
         .args([
             "--db",
             server.dbpath().to_str().unwrap(),
@@ -436,6 +440,8 @@ fn http_reply_save_requires_token_and_is_available_to_readonly_context() {
     assert_eq!(saved.status(), 200);
     let saved: Value = saved.json().unwrap();
     let result = Command::new(BIN)
+        .env_clear()
+        .current_dir(server.tmp.path())
         .args([
             "--db",
             server.dbpath().to_str().unwrap(),
@@ -530,6 +536,8 @@ fn cli_missing_credentials_and_missing_readonly_db_have_no_side_effect() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("missing.sqlite3");
     let result = Command::new(BIN)
+        .env_clear()
+        .current_dir(tmp.path())
         .args([
             "--db",
             path.to_str().unwrap(),
@@ -548,6 +556,8 @@ fn cli_missing_credentials_and_missing_readonly_db_have_no_side_effect() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("OPENAI_API_KEY"));
     assert!(!path.exists());
     let result = Command::new(BIN)
+        .env_clear()
+        .current_dir(tmp.path())
         .args([
             "--db",
             path.to_str().unwrap(),
@@ -576,6 +586,8 @@ fn cli_ingest_and_stdin_draft_use_rust_and_do_not_save_current_mail() {
     )
     .unwrap();
     let result = Command::new(BIN)
+        .env_clear()
+        .current_dir(tmp.path())
         .args([
             "--db",
             path.to_str().unwrap(),
@@ -597,6 +609,8 @@ fn cli_ingest_and_stdin_draft_use_rust_and_do_not_save_current_mail() {
         json!({"indexed":1,"skipped":0})
     );
     let mut child = Command::new(BIN)
+        .env_clear()
+        .current_dir(tmp.path())
         .args([
             "--db",
             path.to_str().unwrap(),

@@ -11,6 +11,7 @@ bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15"
 fancy-regex = "0.16"
 getrandom = "0.3"
 html-escape = "0.2"
