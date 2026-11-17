@@ -19,6 +19,17 @@ pub fn open(path: &Path, readonly: bool) -> Result<Connection> {
     db.set_prepared_statement_cache_capacity(16);
     if !readonly {
         db.pragma_update(None, "secure_delete", true)?;
+    } else if !exists(
+        &db,
+        "SELECT 1 FROM sqlite_master WHERE name='conversation_mail'",
+        [],
+    )? && exists(
+        &db,
+        "SELECT 1 FROM sqlite_master WHERE name='sent_mail'",
+        [],
+    )? {
+        // Older databases remain readable without writing a migration to disk.
+        db.execute_batch("CREATE TEMP VIEW conversation_mail AS SELECT * FROM sent_mail;")?;
     }
     Ok(db)
 }
@@ -106,6 +117,7 @@ fn preserve_mail_ids(db: &Connection) -> Result<()> {
             crate::text(&trigger, "name").replace('"', "\"\"")
         ))?;
     }
+    tx.execute_batch("DROP VIEW IF EXISTS conversation_mail;")?;
     for table in tables {
         let name = crate::text(&table, "name");
         let sql = crate::text(&table, "sql");
@@ -130,11 +142,12 @@ fn preserve_mail_ids(db: &Connection) -> Result<()> {
 pub(crate) fn purge_conversation(db: &Connection, owner: &str, recipient: &str) -> Result<()> {
     let mail = rows(
         db,
-        "SELECT fingerprint FROM sent_mail WHERE owner=? AND recipient=?",
+        "SELECT fingerprint FROM conversation_mail WHERE owner=? AND recipient=?",
         params![owner, recipient],
     )?;
     for table in [
         "sent_mail",
+        "incoming_mail",
         "received_replies",
         "contact_labels",
         "manual_conversations",
@@ -144,8 +157,23 @@ pub(crate) fn purge_conversation(db: &Connection, owner: &str, recipient: &str) 
             params![owner, recipient],
         )?;
     }
+    for job in rows(
+        db,
+        "SELECT account,gmail_id,recipients_json FROM gmail_messages WHERE owner=? AND mail_json IS NOT NULL",
+        [owner],
+    )? {
+        let recipients: Vec<String> = serde_json::from_str(crate::text(&job, "recipients_json"))?;
+        let mut active = false;
+        for other in &recipients {
+            active |=
+                other != recipient && !crate::archive::conversation_deleted(db, owner, other)?;
+        }
+        if !active {
+            db.execute("UPDATE gmail_messages SET status='deleted',mail_json=NULL,recipients_json=NULL,error=NULL WHERE account=? AND gmail_id=?", params![crate::text(&job,"account"),crate::text(&job,"gmail_id")])?;
+        }
+    }
     for item in mail {
-        db.execute("DELETE FROM mail_archive WHERE owner=?1 AND fingerprint=?2 AND NOT EXISTS (SELECT 1 FROM sent_mail WHERE owner=?1 AND fingerprint=?2)", params![owner,crate::text(&item,"fingerprint")])?;
+        db.execute("DELETE FROM mail_archive WHERE owner=?1 AND fingerprint=?2 AND NOT EXISTS (SELECT 1 FROM conversation_mail WHERE owner=?1 AND fingerprint=?2)", params![owner,crate::text(&item,"fingerprint")])?;
     }
     if exists(
         db,

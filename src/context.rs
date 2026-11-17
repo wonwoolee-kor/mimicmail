@@ -219,13 +219,19 @@ pub fn timeline(
     let mut lookup: HashMap<(String, String), BTreeMap<i64, usize>> = HashMap::new();
     for mail in messages {
         work.check()?;
+        let incoming = mail["context"]["incoming"] == true;
+        let sender = if incoming {
+            text(mail, "sender")
+        } else {
+            owner
+        };
         let normalized = readable(text(mail, "original_authored_body"))
             .chars()
             .filter(|c| !c.is_whitespace())
             .collect();
         if let Some(stamp) = timestamp(text(mail, "sent_at")) {
             lookup
-                .entry((owner.to_owned(), normalized))
+                .entry((sender.to_owned(), normalized))
                 .or_default()
                 .entry(stamp)
                 .or_insert(items.len());
@@ -235,7 +241,7 @@ pub fn timeline(
             .and_then(Value::as_str)
             .map(str::to_owned)
             .unwrap_or_else(|| mail["id"].to_string());
-        items.push(Item { sort_at: text(mail,"sent_at").to_owned(), quote_order: 0, value: json!({"kind":"sent","sender":owner,"sender_name":"나","mine":true,"sent_at":mail["sent_at"],"subject":topic(text(mail,"subject")),"body":mail["display_body"],"source_ids":[mail["id"]],"has_reply":mail["has_reply"],"keys":[format!("sent:{fingerprint}")]}) });
+        items.push(Item { sort_at: text(mail,"sent_at").to_owned(), quote_order: 0, value: json!({"kind":if incoming {"incoming"} else {"sent"},"sender":sender,"sender_name":if incoming {mail["context"]["recipient_names"][sender].as_str().unwrap_or("상대방")} else {"나"},"mine":!incoming,"sent_at":mail["sent_at"],"subject":topic(text(mail,"subject")),"body":mail["display_body"],"source_ids":[mail["id"]],"has_reply":mail["has_reply"],"keys":[format!("sent:{fingerprint}")]}) });
     }
     for mail in messages {
         work.check()?;

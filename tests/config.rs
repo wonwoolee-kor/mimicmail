@@ -218,3 +218,71 @@ fn invalid_gui_port_is_rejected_before_database_initialization() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("MIMICMAIL_PORT"));
     assert!(!tmp.path().join("data").exists());
 }
+
+#[test]
+fn gmail_configuration_fails_before_oauth_browser_or_database_side_effects() {
+    let tmp = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["gmail", "connect", "--no-open"],
+        vec!["gmail", "sync"],
+        vec!["gmail", "watch"],
+    ] {
+        let output = command(tmp.path()).args(args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("GMAIL_CLIENT_ID"));
+        assert!(!tmp.path().join("data").exists());
+    }
+    std::fs::write(
+        tmp.path().join(".env"),
+        "GMAIL_ENABLED=true\nGMAIL_POLL_SECONDS=not-a-number\nGMAIL_CLIENT_SECRET=private-secret\n",
+    )
+    .unwrap();
+    let output = command(tmp.path())
+        .args(["gui", "--no-open"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("GMAIL_POLL_SECONDS"));
+    assert!(!error.contains("private-secret"));
+    assert!(!tmp.path().join("data").exists());
+    assert!(
+        command(tmp.path())
+            .args(["gmail", "sync", "--help"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn gmail_status_needs_no_credentials_and_old_context_stays_readonly() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("old.sqlite3");
+    let db = db::connect(&path).unwrap();
+    db.execute_batch("DROP VIEW conversation_mail; DROP TABLE incoming_mail; DROP TABLE gmail_messages; DROP TABLE gmail_sync;").unwrap();
+    drop(db);
+    let before = std::fs::read(&path).unwrap();
+    std::fs::write(
+        tmp.path().join(".env"),
+        "MIMICMAIL_DB=old.sqlite3\nMIMICMAIL_BACKEND=openai\nGMAIL_ENABLED=false\n",
+    )
+    .unwrap();
+    let result = success(
+        command(tmp.path())
+            .args(["gmail", "status"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(result["account"], mimicmail::gmail::ACCOUNT);
+    assert!(result["sync"].is_null());
+    let result = success(
+        command(tmp.path())
+            .args(["--user", "local", "context", "--to", "other"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(result["current_facts"]["user"], "local");
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}

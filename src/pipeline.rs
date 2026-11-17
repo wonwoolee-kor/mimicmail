@@ -105,7 +105,6 @@ pub fn ingest(
     let owner = owner.trim().to_lowercase();
     let mut own: HashSet<_> = aliases.iter().map(|s| s.trim().to_lowercase()).collect();
     own.insert(owner.clone());
-    let owner_id = privacy::person_id(&owner);
     let mut counts = json!({"indexed":0,"skipped":0});
     if since.is_some() {
         counts["excluded_before_date"] = json!(0);
@@ -140,82 +139,118 @@ pub fn ingest(
             increment(&mut counts, "skipped");
             continue;
         }
-        let mut pending = Vec::new();
-        for recipient in recipients {
-            if crate::archive::conversation_deleted(db, &owner_id, &privacy::person_id(recipient))?
-            {
-                continue;
-            }
-            if !db::exists(
-                db,
-                "SELECT 1 FROM sent_mail WHERE owner=? AND fingerprint=? AND recipient=?",
-                params![owner_id, mail.fingerprint, privacy::person_id(recipient)],
-            )? {
-                pending.push(recipient);
-            }
-        }
-        if pending.is_empty() {
-            db.execute(
-                "UPDATE mail_archive SET context_json=? WHERE owner=? AND fingerprint=?",
-                params![
-                    privacy::stored_mail(&mail).context.to_string(),
-                    owner_id,
-                    mail.fingerprint
-                ],
-            )?;
-            increment(&mut counts, "skipped");
-            continue;
-        }
-        let mut profiles = Vec::new();
-        for recipient in &pending {
-            let mut profile = classify(llm, &mail, &owner, recipient, "")?;
-            if let Some(label) = db::one(
-                db,
-                "SELECT label FROM contact_labels WHERE owner=? AND recipient=?",
-                params![owner_id, privacy::person_id(recipient)],
-            )? {
-                profile["role"] = json!(if text(&label, "label").is_empty() {
-                    "unknown"
-                } else {
-                    text(&label, "label")
-                });
-            }
-            profiles.push(profile);
-        }
-        let stored = privacy::stored_mail(&mail);
-        let tx = db.transaction()?;
-        let mut inserted = false;
-        for (recipient, profile) in pending.iter().zip(&profiles) {
-            if crate::archive::conversation_deleted(&tx, &owner_id, &privacy::person_id(recipient))?
-            {
-                continue;
-            }
-            tx.execute(
-                "INSERT INTO sent_mail VALUES (?,?,?,?,?,?,?,?,?)",
-                params![
-                    owner_id,
-                    stored.fingerprint,
-                    stored.message_id,
-                    stored.sender,
-                    privacy::person_id(recipient),
-                    privacy::redact(text(profile, "role")),
-                    text(profile, "relationship"),
-                    text(profile, "purpose"),
-                    stored.authored_body
-                ],
-            )?;
-            inserted = true;
-        }
-        if !inserted {
-            tx.commit()?;
-            increment(&mut counts, "skipped");
-            continue;
-        }
-        tx.execute("INSERT OR IGNORE INTO mail_archive (owner,fingerprint,subject,sent_at,sender,to_json,cc_json,original_body,original_authored_body,source_name,context_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)",params![owner_id,stored.fingerprint,stored.subject,sent_at.map(|s| s.to_rfc3339()).unwrap_or_default(),stored.sender,serde_json::to_string(&stored.to)?,serde_json::to_string(&stored.cc)?,stored.body,stored.authored_body,privacy::redact(&path.file_name().unwrap_or_default().to_string_lossy()),stored.context.to_string()])?;
-        tx.commit()?;
-        increment(&mut counts, "indexed");
+        let indexed = index_mail(
+            db,
+            llm,
+            &mail,
+            &owner,
+            &recipients.into_iter().cloned().collect::<Vec<_>>(),
+            &path.file_name().unwrap_or_default().to_string_lossy(),
+            &crate::work::Work::default(),
+        )?;
+        increment(&mut counts, if indexed { "indexed" } else { "skipped" });
     }
     Ok(counts)
+}
+/// Shared import path: incoming mail supplies facts, sent mail also supplies style.
+pub fn index_mail(
+    db: &Connection,
+    llm: &mut dyn LanguageModel,
+    mail: &Mail,
+    owner: &str,
+    recipients: &[String],
+    source: &str,
+    work: &crate::work::Work,
+) -> Result<bool> {
+    let owner_id = privacy::person_id(owner);
+    let sent_at = mail_datetime(&mail.date);
+    let table = if mail.context["incoming"] == true {
+        "incoming_mail"
+    } else {
+        "sent_mail"
+    };
+    if db::exists(
+        db,
+        "SELECT 1 FROM deleted_messages WHERE owner=? AND message_key=?",
+        params![owner_id, format!("sent:{}", mail.fingerprint)],
+    )? {
+        return Ok(false);
+    }
+    let mut pending = Vec::new();
+    for recipient in recipients {
+        if crate::archive::conversation_deleted(db, &owner_id, &privacy::person_id(recipient))? {
+            continue;
+        }
+        if !db::exists(
+            db,
+            &format!("SELECT 1 FROM {table} WHERE owner=? AND fingerprint=? AND recipient=?"),
+            params![owner_id, mail.fingerprint, privacy::person_id(recipient)],
+        )? {
+            pending.push(recipient);
+        }
+    }
+    if pending.is_empty() {
+        db.execute(
+            "UPDATE mail_archive SET context_json=? WHERE owner=? AND fingerprint=?",
+            params![
+                privacy::stored_mail(mail).context.to_string(),
+                owner_id,
+                mail.fingerprint
+            ],
+        )?;
+        return Ok(false);
+    }
+    let mut profiles = Vec::new();
+    for recipient in &pending {
+        work.check()?;
+        profiles.push(classify(llm, mail, owner, recipient, "")?);
+    }
+    let stored = privacy::stored_mail(mail);
+    work.check()?;
+    let tx = db::immediate(db)?;
+    if db::exists(
+        &tx,
+        "SELECT 1 FROM deleted_messages WHERE owner=? AND message_key=?",
+        params![owner_id, format!("sent:{}", mail.fingerprint)],
+    )? {
+        return Ok(false);
+    }
+    let mut inserted = false;
+    for (recipient, profile) in pending.iter().zip(&profiles) {
+        if crate::archive::conversation_deleted(&tx, &owner_id, &privacy::person_id(recipient))? {
+            continue;
+        }
+        let label = db::one(
+            &tx,
+            "SELECT label FROM contact_labels WHERE owner=? AND recipient=?",
+            params![owner_id, privacy::person_id(recipient)],
+        )?;
+        let role = label
+            .as_ref()
+            .map(|label| text(label, "label"))
+            .unwrap_or(text(profile, "role"));
+        inserted |= tx.execute(
+            &format!("INSERT OR IGNORE INTO {table} VALUES (?,?,?,?,?,?,?,?,?)"),
+            params![
+                owner_id,
+                stored.fingerprint,
+                stored.message_id,
+                stored.sender,
+                privacy::person_id(recipient),
+                privacy::redact(if role.is_empty() { "unknown" } else { role }),
+                text(profile, "relationship"),
+                text(profile, "purpose"),
+                stored.authored_body
+            ],
+        )? > 0;
+    }
+    if !inserted {
+        tx.commit()?;
+        return Ok(false);
+    }
+    tx.execute("INSERT OR IGNORE INTO mail_archive (owner,fingerprint,subject,sent_at,sender,to_json,cc_json,original_body,original_authored_body,source_name,context_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)",params![owner_id,stored.fingerprint,stored.subject,sent_at.map(|s| s.to_rfc3339()).unwrap_or_default(),stored.sender,serde_json::to_string(&stored.to)?,serde_json::to_string(&stored.cc)?,stored.body,stored.authored_body,privacy::redact(source),stored.context.to_string()])?;
+    tx.commit()?;
+    Ok(true)
 }
 fn increment(value: &mut Value, key: &str) {
     value[key] = json!(value[key].as_u64().unwrap_or(0) + 1);

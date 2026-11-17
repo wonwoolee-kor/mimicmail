@@ -1,7 +1,7 @@
 //! CLI options and local environment configuration.
 use anyhow::{Result, anyhow, bail};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum, parser::ValueSource};
-use mimicmail::pipeline;
+use mimicmail::{gmail, pipeline};
 use std::{collections::HashMap, io::ErrorKind, path::PathBuf};
 
 #[derive(Parser)]
@@ -17,6 +17,10 @@ pub struct Args {
     pub model: Option<String>,
     #[arg(skip)]
     pub api_key: String,
+    #[arg(skip)]
+    pub gmail: Option<gmail::Settings>,
+    #[arg(skip)]
+    pub gmail_enabled: bool,
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -27,6 +31,11 @@ pub enum Backend {
 }
 #[derive(Subcommand)]
 pub enum Commands {
+    #[command(about = "전용 Gmail 계정 연결·수집·분석")]
+    Gmail {
+        #[command(subcommand)]
+        command: GmailCommand,
+    },
     #[command(about = "본인 발신 .eml을 분류하고 저장")]
     Ingest {
         #[arg(required=true,num_args=1..)]
@@ -70,6 +79,24 @@ pub enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+pub enum GmailCommand {
+    #[command(about = "읽기 전용 OAuth 승인")]
+    Connect {
+        #[arg(long)]
+        no_open: bool,
+    },
+    #[command(about = "새 메일 수집·분석 1회 실행")]
+    Sync {
+        #[arg(long)]
+        retry_failed: bool,
+    },
+    #[command(about = "주기적으로 새 메일 수집·분석")]
+    Watch,
+    #[command(about = "로컬 동기화 상태 조회")]
+    Status,
+}
+
 impl Args {
     pub fn load() -> Result<Self> {
         // Parse first so --help and --version never need configuration or credentials.
@@ -111,6 +138,36 @@ impl Args {
             });
         }
         args.api_key = value("OPENAI_API_KEY").unwrap_or_default();
+        if matches!(args.command, Commands::Gui { .. }) {
+            args.gmail_enabled = match value("GMAIL_ENABLED").as_deref().unwrap_or("false") {
+                "true" => true,
+                "false" | "" => false,
+                _ => bail!("GMAIL_ENABLED를 true 또는 false로 설정하세요."),
+            };
+        }
+        if args.gmail_enabled || matches!(args.command, Commands::Gmail { .. }) {
+            let seconds: u64 = value("GMAIL_POLL_SECONDS")
+                .unwrap_or_else(|| "120".into())
+                .parse()
+                .ok()
+                .filter(|n| (30..=86400).contains(n))
+                .ok_or_else(|| {
+                    anyhow!("GMAIL_POLL_SECONDS를 30~86400 사이의 정수로 설정하세요.")
+                })?;
+            args.gmail = Some(gmail::Settings {
+                client_id: value("GMAIL_CLIENT_ID").unwrap_or_default(),
+                client_secret: value("GMAIL_CLIENT_SECRET").unwrap_or_default(),
+                owner: args.user.clone().unwrap_or_else(|| gmail::ACCOUNT.into()),
+                aliases: value("MIMICMAIL_ALIASES")
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                interval: std::time::Duration::from_secs(seconds),
+            });
+        }
         if let Commands::Gui { port, .. } = &mut args.command
             && matches
                 .subcommand_matches("gui")

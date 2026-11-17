@@ -477,13 +477,16 @@ async function openEditor(mail,tab){
   try{mail=await api(`/api/mail/${mail.id}`,{signal:controller.signal});}
   catch(e){if(e.name!=='AbortError')error(e.message);return;}
   if(controller.signal.aborted)return;
-  state.editing=mail;state.dirty=false;state.saving=false;$('tab-edit').disabled=mail.deleted;
+  const incoming=mail.context.incoming===true;
+  state.editing=mail;state.dirty=false;state.saving=false;$('tab-edit').disabled=mail.deleted||incoming;
+  $('editor-heading').textContent=incoming?'메일 원문':'문체 편집';
+  $('tab-edit').parentElement.hidden=$('save').hidden=incoming;
   $('editor-subject').textContent=mail.subject||'(제목 없음)';$('editor-date').textContent=`${fullDate(mail.sent_at)} ${clockTime(mail.sent_at)}`;
   $('editor-subject').hidden=!mail.subject;$('editor-date').hidden=mail.context.after_reply_id!==undefined;
   $('edit-body').value=mail.display_body;$('editor-error').hidden=true;$('save').disabled=true;$('save').textContent='변경 저장';
   $('edit-status').textContent='';
   $('original-body').textContent=mail.display_original;
-  $('source-name').textContent=`원본 파일 · ${mail.source_name}`;
+  $('source-name').textContent=mail.source_name==='Gmail'?'Gmail':`원본 파일 · ${mail.source_name}`;
   $('source-name').hidden=!mail.source_name;
   const forms=$('recipient-fields');forms.replaceChildren();
   mail.recipients.forEach(profile=>{const form=el('section','recipient-form');form.dataset.recipient=profile.recipient;form.append(el('h4','',mail.context.recipient_names?.[profile.recipient]||'수신자'));const fields=el('div','field-grid');fields.append(profileField('메일 목적','purpose',profile.purpose,state.data.purposes),profileField('나와의 관계','relationship',profile.relationship,state.data.relationships));form.append(fields);forms.append(form);});

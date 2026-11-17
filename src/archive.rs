@@ -18,7 +18,7 @@ pub fn get_mail(db: &Connection, id: i64) -> Result<Value> {
         .ok_or_else(|| fault(404, "메일을 찾을 수 없습니다."))?;
     let recipients = db::rows(
         db,
-        "SELECT recipient,role,relationship,purpose,authored_body FROM sent_mail WHERE owner=? AND fingerprint=? ORDER BY recipient",
+        "SELECT recipient,role,relationship,purpose,authored_body FROM conversation_mail WHERE owner=? AND fingerprint=? ORDER BY recipient",
         params![text(&item, "owner"), text(&item, "fingerprint")],
     )?;
     for (field, key) in [
@@ -46,7 +46,7 @@ pub fn get_mail(db: &Connection, id: i64) -> Result<Value> {
     ] {
         item[key] = json!(readable(text(&item, source)));
     }
-    item["has_reply"] = json!(has_reply(&item["context"]));
+    item["has_reply"] = json!(has_reply(&item["context"]) || item["context"]["incoming"] == true);
     item["deleted"] = json!(db::exists(
         db,
         "SELECT 1 FROM deleted_messages WHERE owner=? AND message_key=?",
@@ -86,7 +86,7 @@ pub fn conversation(db: &Connection, owner: &str, recipient: &str) -> Result<Val
     if conversation_deleted(db, &owner, &recipient)? {
         return Ok(json!({"messages":[],"timeline":[]}));
     }
-    let mut statement = db.prepare_cached("SELECT a.id FROM mail_archive a JOIN sent_mail s ON a.owner=s.owner AND a.fingerprint=s.fingerprint WHERE a.owner=? AND s.recipient=? ORDER BY a.sent_at,a.id")?;
+    let mut statement = db.prepare_cached("SELECT a.id FROM mail_archive a JOIN conversation_mail s ON a.owner=s.owner AND a.fingerprint=s.fingerprint WHERE a.owner=? AND s.recipient=? ORDER BY a.sent_at,a.id")?;
     let ids = statement.query_map(params![owner, recipient], |r| r.get::<_, i64>(0))?;
     let messages = ids
         .map(|id| get_mail(db, id?))
@@ -113,17 +113,18 @@ pub(crate) fn index_conversation(
     }
     let deleted = deleted_keys(db, owner)?;
     let mut messages = db::rows(db,
-        "SELECT a.id,a.owner,a.fingerprint,a.subject,a.sent_at,a.revision,a.original_authored_body,a.context_json,
-         (SELECT authored_body FROM sent_mail WHERE owner=a.owner AND fingerprint=a.fingerprint ORDER BY recipient LIMIT 1) AS authored_body,
-         (SELECT json_group_array(json_object('purpose',purpose)) FROM sent_mail WHERE owner=a.owner AND fingerprint=a.fingerprint) AS recipients_json
-         FROM mail_archive a JOIN sent_mail s ON a.owner=s.owner AND a.fingerprint=s.fingerprint
+        "SELECT a.id,a.owner,a.sender,a.fingerprint,a.subject,a.sent_at,a.revision,a.original_authored_body,a.context_json,
+         (SELECT authored_body FROM conversation_mail WHERE owner=a.owner AND fingerprint=a.fingerprint ORDER BY recipient LIMIT 1) AS authored_body,
+         (SELECT json_group_array(json_object('purpose',purpose)) FROM conversation_mail WHERE owner=a.owner AND fingerprint=a.fingerprint) AS recipients_json
+         FROM mail_archive a JOIN conversation_mail s ON a.owner=s.owner AND a.fingerprint=s.fingerprint
          WHERE a.owner=? AND s.recipient=? ORDER BY a.sent_at,a.id", params![owner, recipient])?;
     for mail in &mut messages {
         work.check()?;
         mail["context"] = serde_json::from_str(text(mail, "context_json"))?;
         mail["recipients"] = serde_json::from_str(text(mail, "recipients_json"))?;
         mail["display_body"] = json!(readable(text(mail, "authored_body")));
-        mail["has_reply"] = json!(has_reply(&mail["context"]));
+        mail["has_reply"] =
+            json!(has_reply(&mail["context"]) || mail["context"]["incoming"] == true);
         mail["deleted"] = json!(deleted.contains(&format!("sent:{}", text(mail, "fingerprint"))));
         for key in ["context_json", "recipients_json", "authored_body"] {
             mail.as_object_mut().unwrap().remove(key);
@@ -208,7 +209,7 @@ pub fn conversations(
     unlabeled: bool,
 ) -> Result<Value> {
     let mut contacts: serde_json::Map<String, Value> = serde_json::Map::new();
-    let mut statement = db.prepare_cached("SELECT a.owner,s.recipient,a.context_json FROM mail_archive a JOIN sent_mail s ON a.owner=s.owner AND a.fingerprint=s.fingerprint ORDER BY a.sent_at DESC,a.id DESC")?;
+    let mut statement = db.prepare_cached("SELECT a.owner,s.recipient,a.context_json FROM mail_archive a JOIN conversation_mail s ON a.owner=s.owner AND a.fingerprint=s.fingerprint ORDER BY a.sent_at DESC,a.id DESC")?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         let owner: String = row.get(0)?;
@@ -348,6 +349,9 @@ pub fn update_mail(db: &Connection, id: i64, payload: &Value) -> Result<Value> {
             "삭제된 메시지입니다. 편집기를 닫고 새로고침하세요.",
         ));
     }
+    if current["context"]["incoming"] == true {
+        return Err(fault(400, "수신 메일은 문체로 편집할 수 없습니다."));
+    }
     let body = string(payload, "authored_body", "문체 참조 본문을 입력하세요.")?;
     if body.trim().is_empty() {
         bail!("문체 참조 본문을 입력하세요.");
@@ -424,7 +428,7 @@ fn update_label_inner(db: &Connection, payload: &Value) -> Result<Value> {
     }
     if !db::exists(
         db,
-        "SELECT 1 FROM sent_mail WHERE owner=? AND recipient=? UNION ALL SELECT 1 FROM manual_conversations WHERE owner=? AND recipient=?",
+        "SELECT 1 FROM conversation_mail WHERE owner=? AND recipient=? UNION ALL SELECT 1 FROM manual_conversations WHERE owner=? AND recipient=?",
         params![owner, recipient, owner, recipient],
     )? {
         return Err(fault(404, "대화를 찾을 수 없습니다."));
@@ -452,15 +456,17 @@ fn update_label_inner(db: &Connection, payload: &Value) -> Result<Value> {
             "다른 창에서 변경된 라벨입니다. 새로고침 후 다시 지정하세요.",
         ));
     }
-    db.execute(
-        "UPDATE sent_mail SET role=? WHERE owner=? AND recipient=?",
-        params![
-            if label.is_empty() { "unknown" } else { &label },
-            owner,
-            recipient
-        ],
-    )?;
-    db.execute("UPDATE mail_archive SET revision=revision+1,updated_at=? WHERE owner=? AND fingerprint IN (SELECT fingerprint FROM sent_mail WHERE owner=? AND recipient=?)",params![Utc::now().to_rfc3339(),owner,owner,recipient])?;
+    for table in ["sent_mail", "incoming_mail"] {
+        db.execute(
+            &format!("UPDATE {table} SET role=? WHERE owner=? AND recipient=?"),
+            params![
+                if label.is_empty() { "unknown" } else { &label },
+                owner,
+                recipient
+            ],
+        )?;
+    }
+    db.execute("UPDATE mail_archive SET revision=revision+1,updated_at=? WHERE owner=? AND fingerprint IN (SELECT fingerprint FROM conversation_mail WHERE owner=? AND recipient=?)",params![Utc::now().to_rfc3339(),owner,owner,recipient])?;
     Ok(json!({"label":label,"revision":version+1}))
 }
 pub fn update_contact_label(db: &Connection, payload: &Value) -> Result<Value> {
@@ -681,7 +687,7 @@ pub fn create_reply(db: &Connection, payload: &Value) -> Result<Value> {
     require_active_conversation(&tx, &owner, &recipient)?;
     if !db::exists(
         &tx,
-        "SELECT 1 FROM sent_mail WHERE owner=? AND recipient=? UNION ALL SELECT 1 FROM manual_conversations WHERE owner=? AND recipient=?",
+        "SELECT 1 FROM conversation_mail WHERE owner=? AND recipient=? UNION ALL SELECT 1 FROM manual_conversations WHERE owner=? AND recipient=?",
         params![owner, recipient, owner, recipient],
     )? {
         return Err(fault(
@@ -744,7 +750,7 @@ pub fn delete_conversation(db: &Connection, payload: &Value) -> Result<Value> {
     if !conversation_deleted(&tx, &owner, &recipient)?
         && !db::exists(
             &tx,
-            "SELECT 1 FROM sent_mail WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM manual_conversations WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM received_replies WHERE owner=?1 AND recipient=?2",
+            "SELECT 1 FROM conversation_mail WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM manual_conversations WHERE owner=?1 AND recipient=?2 UNION ALL SELECT 1 FROM received_replies WHERE owner=?1 AND recipient=?2",
             params![owner, recipient],
         )?
     {
@@ -786,7 +792,7 @@ pub fn delete_message(db: &Connection, payload: &Value) -> Result<Value> {
                 "이미 삭제되었거나 찾을 수 없는 메시지입니다. 새로고침하세요.",
             )
         })?;
-    if item["kind"] == "sent" {
+    if item["kind"] == "sent" || item["kind"] == "incoming" {
         let mail = array(&data, "messages")
             .iter()
             .find(|m| m["id"] == item["source_ids"][0])

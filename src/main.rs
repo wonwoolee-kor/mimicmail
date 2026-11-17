@@ -1,17 +1,75 @@
 mod config;
 
 use anyhow::{Context, Result, bail};
-use config::{Args, Backend, Commands};
+use config::{Args, Backend, Commands, GmailCommand};
 use mimicmail::{
-    db, drafting,
+    db, drafting, gmail,
     llm::{Codex, LanguageModel, OpenAI},
     mail, pipeline, server,
 };
 use std::path::PathBuf;
 
 fn run(args: Args) -> Result<()> {
+    let make_model = {
+        let backend = args.backend.clone();
+        let model = args.model.clone();
+        let api_key = args.api_key.clone();
+        move || -> Result<Box<dyn LanguageModel>> {
+            Ok(match backend {
+                Backend::Codex => Box::new(Codex::new(model.clone())?),
+                Backend::Openai => Box::new(OpenAI::new(
+                    api_key.clone(),
+                    model.clone().unwrap_or_default(),
+                )?),
+            })
+        }
+    };
     if let Commands::Gui { port, no_open } = args.command {
+        let _collector = if args.gmail_enabled {
+            args.gmail.as_ref().unwrap().validate()?;
+            db::connect(&args.db)?;
+            Some(gmail::Background::start(
+                args.db.clone(),
+                args.gmail.unwrap(),
+                make_model,
+            )?)
+        } else {
+            None
+        };
         return server::serve(&args.db, port, !no_open);
+    }
+    if let Commands::Gmail { command } = args.command {
+        let settings = args.gmail.unwrap();
+        match command {
+            GmailCommand::Connect { no_open } => gmail::connect(&settings, &args.db, !no_open)?,
+            GmailCommand::Sync { retry_failed } => println!(
+                "{}",
+                serde_json::to_string_pretty(&gmail::synchronize(
+                    &args.db,
+                    &settings,
+                    &mimicmail::work::Work::default(),
+                    &make_model,
+                    retry_failed
+                )?)?
+            ),
+            GmailCommand::Status => println!(
+                "{}",
+                serde_json::to_string_pretty(&gmail::status(&db::open(&args.db, true)?)?)?
+            ),
+            GmailCommand::Watch => {
+                let _collector = gmail::Background::start(args.db, settings, make_model)?;
+                tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(async {
+                    #[cfg(unix)]
+                    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+                    tokio::select! {
+                        result = tokio::signal::ctrl_c() => result?,
+                        _ = async { #[cfg(unix)] { terminate.recv().await; } #[cfg(not(unix))] { std::future::pending::<()>().await; } } => {},
+                    }
+                    Ok::<(),anyhow::Error>(())
+                })?;
+            }
+        }
+        return Ok(());
     }
     let user = args
         .user
@@ -37,10 +95,7 @@ fn run(args: Args) -> Result<()> {
         );
         return Ok(());
     }
-    let mut llm: Box<dyn LanguageModel> = match args.backend {
-        Backend::Codex => Box::new(Codex::new(args.model)?),
-        Backend::Openai => Box::new(OpenAI::new(args.api_key, args.model.unwrap_or_default())?),
-    };
+    let mut llm = make_model()?;
     let result = match args.command {
         Commands::Ingest {
             paths,

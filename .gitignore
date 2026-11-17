@@ -14,6 +14,8 @@ __pycache__/
 *.db-*
 *.eml
 *.mbox
+*.gmail-token.json
+*.gmail.lock
 *.egg-info/
 build/
 dist/

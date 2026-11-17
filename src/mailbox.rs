@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 pub fn initialize(db: &Connection) -> Result<()> {
     let tx = Transaction::new_unchecked(db, TransactionBehavior::Immediate)?;
     tx.execute_batch(include_str!("../sql/browse-schema.sql"))?;
-    let current = db::exists(&tx, "SELECT 1 FROM browse_meta WHERE version=1", [])?;
+    let current = db::exists(&tx, "SELECT 1 FROM browse_meta WHERE version=2", [])?;
     if !db::rows(&tx, "PRAGMA table_info(browse_items)", [])?
         .iter()
         .any(|r| r["name"] == "search_text")
@@ -19,6 +19,7 @@ pub fn initialize(db: &Connection) -> Result<()> {
     for table in [
         "mail_archive",
         "sent_mail",
+        "incoming_mail",
         "contact_labels",
         "manual_conversations",
         "received_replies",
@@ -31,14 +32,14 @@ pub fn initialize(db: &Connection) -> Result<()> {
                     continue;
                 }
                 let select = match table {
-                    "sent_mail" => format!(
-                        "SELECT owner,recipient FROM sent_mail WHERE owner={row}.owner AND fingerprint={row}.fingerprint UNION SELECT {row}.owner,{row}.recipient"
+                    "sent_mail" | "incoming_mail" => format!(
+                        "SELECT owner,recipient FROM conversation_mail WHERE owner={row}.owner AND fingerprint={row}.fingerprint UNION SELECT {row}.owner,{row}.recipient"
                     ),
                     "mail_archive" => format!(
-                        "SELECT owner,recipient FROM sent_mail WHERE owner={row}.owner AND fingerprint={row}.fingerprint"
+                        "SELECT owner,recipient FROM conversation_mail WHERE owner={row}.owner AND fingerprint={row}.fingerprint"
                     ),
                     "deleted_messages" => format!(
-                        "SELECT owner,recipient FROM sent_mail WHERE owner={row}.owner UNION SELECT owner,recipient FROM manual_conversations WHERE owner={row}.owner UNION SELECT owner,recipient FROM received_replies WHERE owner={row}.owner"
+                        "SELECT owner,recipient FROM conversation_mail WHERE owner={row}.owner UNION SELECT owner,recipient FROM manual_conversations WHERE owner={row}.owner UNION SELECT owner,recipient FROM received_replies WHERE owner={row}.owner"
                     ),
                     _ => format!("SELECT {row}.owner,{row}.recipient"),
                 };
@@ -51,8 +52,8 @@ pub fn initialize(db: &Connection) -> Result<()> {
         }
     }
     if !current {
-        tx.execute_batch("DELETE FROM browse_items; DELETE FROM browse_contacts; DELETE FROM browse_dirty; DELETE FROM browse_meta; INSERT INTO browse_meta VALUES (1);")?;
-        tx.execute_batch("INSERT OR IGNORE INTO browse_dirty SELECT owner,recipient FROM sent_mail UNION SELECT owner,recipient FROM manual_conversations UNION SELECT owner,recipient FROM received_replies;")?;
+        tx.execute_batch("DELETE FROM browse_items; DELETE FROM browse_contacts; DELETE FROM browse_dirty; DELETE FROM browse_meta; INSERT INTO browse_meta VALUES (2);")?;
+        tx.execute_batch("INSERT OR IGNORE INTO browse_dirty SELECT owner,recipient FROM conversation_mail UNION SELECT owner,recipient FROM manual_conversations UNION SELECT owner,recipient FROM received_replies;")?;
     }
     tx.commit()?;
     Ok(())

@@ -42,3 +42,25 @@ CREATE TABLE IF NOT EXISTS sent_mail (
             id INTEGER PRIMARY KEY CHECK(id=1), entries_json TEXT NOT NULL,
             revision INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS incoming_mail (
+            owner TEXT NOT NULL, fingerprint TEXT NOT NULL, message_id TEXT NOT NULL,
+            sender TEXT NOT NULL, recipient TEXT NOT NULL, role TEXT NOT NULL,
+            relationship TEXT NOT NULL, purpose TEXT NOT NULL, authored_body TEXT NOT NULL,
+            PRIMARY KEY(owner, fingerprint, recipient)
+        );
+        CREATE INDEX IF NOT EXISTS incoming_recipient ON incoming_mail(owner, recipient);
+        CREATE VIEW IF NOT EXISTS conversation_mail AS
+            SELECT * FROM sent_mail UNION ALL SELECT * FROM incoming_mail;
+        CREATE TABLE IF NOT EXISTS gmail_sync (
+            account TEXT PRIMARY KEY, owner TEXT NOT NULL, history_id TEXT NOT NULL DEFAULT '',
+            synced_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS gmail_messages (
+            account TEXT NOT NULL, gmail_id TEXT NOT NULL, owner TEXT NOT NULL,
+            fingerprint TEXT NOT NULL DEFAULT '', dedup_key TEXT NOT NULL DEFAULT '', mail_json TEXT, recipients_json TEXT,
+            status TEXT NOT NULL, error TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+            retry_at INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(account, gmail_id)
+        );
+        CREATE INDEX IF NOT EXISTS gmail_pending ON gmail_messages(account, status, retry_at);
+        CREATE INDEX IF NOT EXISTS gmail_dedup ON gmail_messages(owner, dedup_key);

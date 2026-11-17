@@ -106,7 +106,7 @@ fn build_context(
         })
         .unwrap_or("수신자");
     let history: Vec<_> = array(data,"timeline").iter().map(|item| {
-        let body = if item["kind"]=="sent" {
+        let body = if item["kind"]=="sent" || item["kind"]=="incoming" {
             array(data,"messages").iter().find(|m|m["id"]==item["source_ids"][0])
                 .map(|m|m["display_original_authored"].clone()).unwrap_or(Value::Null)
         } else { item["body"].clone() };
@@ -114,7 +114,7 @@ fn build_context(
     }).collect();
     let existing = array(data, "timeline")
         .iter()
-        .any(|item| item["kind"] != "received");
+        .any(|item| item["kind"] == "sent" || item["kind"] == "quote");
     let styles = style_candidates(db, owner, recipient, text(profile, "role"), existing)?;
     let choose = |items: &[Value], ids: &[String], key: &str| -> Result<Vec<Value>> {
         let mut selected = Vec::new();

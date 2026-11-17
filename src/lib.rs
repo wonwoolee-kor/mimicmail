@@ -2,6 +2,7 @@ pub mod archive;
 pub mod context;
 pub mod db;
 pub mod drafting;
+pub mod gmail;
 pub mod llm;
 pub mod mail;
 pub mod mailbox;

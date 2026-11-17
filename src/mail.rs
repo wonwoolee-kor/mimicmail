@@ -4,7 +4,7 @@ use html5ever::tokenizer::{
 };
 use mailparse::{MailAddr, MailHeaderMap, ParsedMail};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{cell::RefCell, collections::HashSet, io::Read, path::Path, sync::LazyLock};
 
@@ -217,7 +217,7 @@ fn body_part<'a>(mail: &'a ParsedMail<'a>, mime: &str) -> Option<&'a ParsedMail<
     }
     mail.subparts.iter().find_map(|p| body_part(p, mime))
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Mail {
     pub fingerprint: String,
     pub message_id: String,
